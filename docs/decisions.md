@@ -366,6 +366,16 @@ işliyor. Gelen her istek `muiget --add <base64-json>` olarak yeniden
 taşıyor ve ikinci süreç kapanıyor. Uygulama kapalıysa bu süreç ilk örnek olup
 kendi argümanını işliyor.
 
+**Düzeltme (29 Ağu 2026):** Köprü kipini yalnızca `--native-host` bayrağı
+açıyordu, ama Chrome bu bayrağı hiçbir zaman geçirmiyor: native messaging
+manifestinde argüman alanı yok, komut
+`muiget.exe chrome-extension://<id>/ --parent-window=<handle>` biçiminde
+çalıştırılıyor. Yani gerçek Chrome her denemede stdio köprüsü yerine boş bir
+pencere açardı — birim testler protokolü doğruladığı için hata sahada
+denenmeden görünmüyordu. Kip artık `native_host::is_host_invocation()` ile
+belirleniyor: `chrome-extension://` önekli argüman **ya da** elle verilen
+`--native-host` köprüyü açıyor; `--add` her zaman pencereye gidiyor.
+
 **Gerekçe:**
 - Tek binary: dağıtımda ikinci bir dosya, ikinci bir sürüm uyumu sorunu yok.
 - Köprü süreci **durumsuz ve kısa ömürlü**; MV3 service worker'ı zaten uykuya

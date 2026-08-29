@@ -8,7 +8,7 @@ anahtarı satın alması gerekmeyen, kodunu herkesin okuyup değiştirebildiği 
 [![Status](https://img.shields.io/badge/durum-geli%C5%9Ftirme%20a%C5%9Famas%C4%B1nda-orange.svg)](docs/tasks.md)
 
 > ⚠️ **Bu proje erken geliştirme aşamasında.** İndirme motoru, arayüz ve Chrome
-> uzantısı çalışıyor (143 test geçiyor) ama uygulama geniş çapta sahada
+> uzantısı çalışıyor (147 test geçiyor) ama uygulama geniş çapta sahada
 > denenmedi ve torrent desteği henüz eklenmedi. İlerlemeyi
 > [`docs/tasks.md`](docs/tasks.md) üzerinden takip edebilirsiniz.
 

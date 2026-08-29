@@ -7,6 +7,63 @@ Format: Tarih, yapılanlar, kararlar, sıradaki adım.
 
 ---
 
+## 2026-08-30 (8. oturum) — Chrome Köprüsü Sahada Denendi, Kip Tetikleyicisi Düzeltildi
+
+İlker "uzantıyı nasıl kurup test ederim" diye sordu. Kuruluma başlamadan önce,
+köprünün Chrome'un gerçekte kullandığı çağrıyla çalışmadığı ortaya çıktı.
+
+### Hata: `--native-host` bayrağı hiçbir zaman gelmiyor
+
+Köprü kipini yalnızca `--native-host` argümanı açıyordu. Chrome bu bayrağı
+geçirmiyor: native messaging manifestinde argüman alanı yok ve host şu komutla
+başlatılıyor:
+
+```text
+muiget.exe chrome-extension://<id>/ --parent-window=<handle>
+```
+
+Yani gerçek Chrome her denemede stdio köprüsü yerine **boş bir pencere**
+açardı. Birim testler protokolü doğruladığı için hata görünmüyordu — 7.
+oturumdaki Tokio çökmesiyle aynı sınıf: "testler geçiyor" ile "çalışıyor"
+arasındaki fark.
+
+**Düzeltme:** kip artık `native_host::is_host_invocation()` ile belirleniyor.
+`chrome-extension://` önekli argüman **ya da** elle verilen `--native-host`
+köprüyü açıyor; `--add` her zaman pencereye gidiyor. Dört birim test eklendi,
+karar #13'e düzeltme notu yazıldı.
+
+### Köprü, Chrome olmadan uçtan uca doğrulandı
+
+Host, Chrome'un gerçek argümanlarıyla çalıştırılıp uzunluk önekli mesajlar
+gönderildi:
+
+- `ping` → `{"type":"pong","version":"0.1.0"}`; pencere açılmadı, süreç çıktı
+- `download` → `{"type":"accepted",...}`; uygulama `--add` ile açıldı, yerel
+  sunucudan 2 MB dosya indi, SHA-256 kaynakla **birebir aynı**
+
+Köprü kaydı (manifest + `HKCU` registry) elle yazıldı. Paketlenmemiş uzantının
+kimliği Chrome'un algoritmasıyla klasör yolundan hesaplandı — yolun UTF-16LE
+baytlarının SHA-256'sı, ilk 16 bayt, hex haneleri `a-p`'ye eşlenerek:
+`jmicepilfahlolilhkejmcmcpdhjjokf`.
+
+### Kalan tek adım
+
+Chrome'da **Paketlenmemiş öğe yükle** — bir Windows dosya seçme penceresi,
+otomatikleştirilemiyor. Zincirin Chrome'a değen son halkası hâlâ denenmedi.
+
+### Açık risk
+
+Köprü, uygulamayı `--add` ile başlatırken stdout'u miras bırakıyor. Testte
+borunun EOF'u uygulama kapanana kadar gelmedi. Chrome yanıtı hemen okuyup
+host'u sonlandırdığı için sorun çıkarmaması gerekiyor; popup takılırsa ilk
+bakılacak yer burası. Çözümü kısa: çocuk sürece `Stdio::null()` vermek.
+
+### Sıradaki
+
+Chrome'la ilk gerçek deneme (İlker'in iki tıklaması), sonra Faz 4 (torrent).
+
+---
+
 ## 2026-08-29 (7. oturum) — Çökme Düzeltildi, Uygulama İlk Kez Gerçekten Çalıştırıldı
 
 İlker "yeni indirme yapmaya kalkınca uygulama çöküyor" dedi. Sebep bulundu,

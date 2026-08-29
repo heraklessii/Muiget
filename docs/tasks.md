@@ -191,8 +191,13 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
    büyük bilinmeyen:
    - Büyük bir dosyayı (ISO/zip) indirip IDM ile hız karşılaştırması. Otomatik
      testler doğruluğu gösteriyor, hızı değil.
-   - Gerçek Chrome ile köprü denemesi. Native messaging protokolü birim testli
-     ama Chrome'un host'u gerçekten başlattığı senaryo hiç denenmedi.
+   - Gerçek Chrome ile köprü denemesi. Köprü, Chrome'un kullandığı argümanlarla
+     uçtan uca doğrulandı (8. oturum: `accepted` yanıtı, 2 MB indirme, SHA-256
+     birebir) ve host kaydı yazıldı. Kalan tek adım Chrome'da
+     **Paketlenmemiş öğe yükle** — otomatikleştirilemiyor.
+   - Köprü, uygulamayı `--add` ile başlatırken stdout'u miras bırakıyor.
+     Chrome'un yanıtı beklemeden dispatch ettiği varsayılıyor; popup takılırsa
+     çocuk sürece `Stdio::null()` verilmeli.
 2. **Faz 4 (torrent)** — en büyük yeni yüzey; yukarıdaki bitmeden
    başlanmamalı.
 3. **Kalan arayüz işleri** — sürükle-bırak ile bağlantı ekleme ve satır sağ tık

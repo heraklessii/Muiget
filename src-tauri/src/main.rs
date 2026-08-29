@@ -6,9 +6,10 @@ use muiget_lib::extension_bridge::native_host;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    // Chrome, native messaging host'unu bu bayrakla başlatıyor. O durumda
+    // Chrome köprüyü, manifestteki komuta uzantı kimliğini argüman olarak
+    // geçirerek başlatıyor (manifestin özel argüman alanı yok). O durumda
     // pencere açılmıyor: süreç yalnızca stdio köprüsünü işletip çıkıyor.
-    if args.iter().any(|a| a == native_host::HOST_FLAG) {
+    if native_host::is_host_invocation(&args) {
         if let Err(e) = native_host::run_host() {
             // Chrome stderr'i kendi log'una yazıyor; tanılama için tek kanal bu.
             eprintln!("muiget native host hatası: {e}");

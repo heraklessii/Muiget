@@ -39,8 +39,31 @@ pub const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 /// Ana uygulamayı indirme eklemek için çağırırken kullanılan argüman.
 pub const ADD_FLAG: &str = "--add";
 
-/// Köprü kipini açan argüman. Chrome manifestteki komutu bu bayrakla çağırıyor.
+/// Köprü kipini elle açan argüman — duman testi ve elle yazılmış manifestler
+/// için. Chrome bu bayrağı **geçirmiyor**; bkz. [`ORIGIN_PREFIX`].
 pub const HOST_FLAG: &str = "--native-host";
+
+/// Chrome'un köprü sürecine ilk argüman olarak verdiği çağıran kimliği.
+///
+/// Native messaging manifestinde özel argüman alanı yok: Chrome komutu
+/// `<exe> chrome-extension://<id>/ --parent-window=<handle>` biçiminde
+/// çalıştırıyor. Bu yüzden köprü kipi yalnızca [`HOST_FLAG`] ile anlaşılamaz.
+/// Edge de Chromium tabanlı olduğu için aynı öneki veriyor.
+pub const ORIGIN_PREFIX: &str = "chrome-extension://";
+
+/// Sürecin köprü kipinde mi başlatıldığını söyler.
+///
+/// [`ADD_FLAG`] varsa asla köprü kipi değil: o çağrı çalışan pencereyi
+/// hedefliyor. Base64 yükü `:` içeremediği için ikisi pratikte karışamaz,
+/// yine de sıra açıkça yazıldı — yükün kodlaması ileride değişirse sessiz
+/// bir hataya dönüşmesin.
+pub fn is_host_invocation(args: &[String]) -> bool {
+    if args.iter().any(|a| a == ADD_FLAG) {
+        return false;
+    }
+
+    args.iter().any(|a| a == HOST_FLAG || a.starts_with(ORIGIN_PREFIX))
+}
 
 /// Uzantıdan gelen mesajlar.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -518,5 +541,42 @@ mod tests {
         let manifest = manifest_json(Path::new("/usr/bin/muiget"), &[]);
         let cozulen: serde_json::Value = serde_json::from_str(&manifest).unwrap();
         assert_eq!(cozulen["allowed_origins"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn chrome_kaynagi_kopru_kipini_aciyor() {
+        // Chrome'un gerçekte verdiği argümanlar: kimlik + pencere tutamacı.
+        let args = vec![
+            "muiget.exe".to_string(),
+            "chrome-extension://abcdefghijklmnopabcdefghijklmnop/".to_string(),
+            "--parent-window=12345".to_string(),
+        ];
+
+        assert!(is_host_invocation(&args));
+    }
+
+    #[test]
+    fn elle_verilen_bayrak_kopru_kipini_aciyor() {
+        let args = vec!["muiget.exe".to_string(), HOST_FLAG.to_string()];
+        assert!(is_host_invocation(&args));
+    }
+
+    #[test]
+    fn argumansiz_calistirma_pencere_aciyor() {
+        assert!(!is_host_invocation(&["muiget.exe".to_string()]));
+    }
+
+    #[test]
+    fn add_cagrisi_kopru_kipine_girmiyor() {
+        let args = vec![
+            "muiget.exe".to_string(),
+            ADD_FLAG.to_string(),
+            encode_payload(&DownloadRequest {
+                url: "https://ornek.com/a.zip".into(),
+                ..Default::default()
+            }),
+        ];
+
+        assert!(!is_host_invocation(&args));
     }
 }

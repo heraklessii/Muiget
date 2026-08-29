@@ -117,7 +117,7 @@ npm run dev       # sadece frontend (Vite, localhost:1420)
 npm run build     # tsc + vite build → dist/
 npm run tauri dev # tam uygulama (Rust + pencere)
 cargo check       # src-tauri/ içinde, hızlı Rust doğrulaması
-cargo test        # 130 birim + 13 uçtan uca test
+cargo test        # 134 birim + 13 uçtan uca test
 ```
 
 Uçtan uca testler (`src-tauri/tests/indirme_uctan_uca.rs`) elle yazılmış küçük
@@ -163,9 +163,10 @@ Detaylar için `docs/decisions.md`. Kısa özet:
 ## Sıradaki Adım
 
 **Faz 0, 1, 2, 3 ve 5 tamamlandı.** Çalışan bir segmentli indirme motoru, tam
-bir arayüz ve Chrome uzantısı var. 143 test geçiyor. Uygulama gerçek
+bir arayüz ve Chrome uzantısı var. 147 test geçiyor. Uygulama gerçek
 penceresinde uçtan uca doğrulandı (8 MB dosya, 8 paralel segment, SHA-256
-birebir aynı) ve v0.1.0 ön sürümü yayınlandı.
+birebir aynı). Chrome köprüsü de Chrome'un gerçek çağrısıyla doğrulandı;
+son yayın v0.1.1.
 
 Ayrıca teknik borcun üç maddesi kapandı: indirme listesi oturumlar arası
 korunuyor (açılışta `.muiget` taraması), uzantıdan gelen başlıklar metaya
@@ -188,8 +189,9 @@ Sıradaki öncelikler (`docs/tasks.md` → "Sıradaki"):
 3. **Kalan arayüz işleri** — sürükle-bırak ile bağlantı ekleme, satır sağ tık
    menüsü. Küçük ve bağımsız.
 
-**İlker'e kalan (kod dışı):** GitHub reposunun oluşturulması ve ilk commit.
-Repoda hâlâ hiç commit yok, remote tanımlı değil.
+**İlker'e kalan (kod dışı):** Chrome'da `chrome://extensions` → **Paketlenmemiş
+öğe yükle** → `extension/`. Köprünün geri kalanı (host kaydı, kimlik, uçtan uca
+indirme) 8. oturumda doğrulandı; dosya seçme penceresi otomatikleştirilemiyor.
 
 Her yeni oturum şu sırayla okunmalı:
 1. Bu dosya (`CLAUDE.md`) — genel bağlam
