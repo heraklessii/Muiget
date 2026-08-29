@@ -177,6 +177,13 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
       kütüphanesi yok, `npx tauri icon` platform boyutlarını türetiyor)
 - [x] GitHub Pages tanıtım sayfası (`site/`, `gh-pages` dalına yayınlanıyor)
 - [x] Yayın iş akışı (`v*` etiketi → Windows kurulum paketleri → GitHub Release)
+- [x] v0.1.0 ön sürümü yayınlandı (elle; iş akışı depo izin ayarı yüzünden
+      düşmüştü, ayar düzeltildi)
+- [ ] **Yayın iş akışının sürüm oluşturma adımı sahada sınanmadı.** İlk
+      koşuşta derleme geçti ama `create-release` 403 aldı; depo ayarı
+      (`default_workflow_permissions`) `write` yapıldı. Bir sonraki `v*`
+      etiketinde uçtan uca çalıştığı doğrulanmalı — çalışmazsa v0.1.0'daki
+      gibi elle yayınlama yolu duruyor.
 
 ## Sıradaki (Şu Anki Öncelik)
 

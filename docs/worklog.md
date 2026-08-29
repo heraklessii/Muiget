@@ -78,6 +78,19 @@ klasörleri silindi (proje masaüstü hedefliyor).
 - `.github/workflows/release.yml` — `v*` etiketi itilince `tauri-action` ile
   Windows kurulum paketlerini derleyip GitHub Release'ine yüklüyor. Ön sürüm
   olarak işaretleniyor: 0.1.0 sahada geniş çapta denenmedi.
+
+  İlk koşuşta derleme başarılı oldu ama sürüm oluşturma adımı
+  `Resource not accessible by integration` ile düştü. Sebep depo ayarıydı:
+  `default_workflow_permissions` `read`ti ve bu, iş akışı dosyasındaki
+  `permissions: contents: write` isteğini tavanlıyor. (İlginç ayrıntı: aynı
+  izinle `gh-pages` dalına `git push` çalışıyordu — kısıt yalnızca REST API
+  tarafında hissediliyor.) Ayar `write` yapıldı; her iş akışı zaten kendi
+  ihtiyacı kadar izni açıkça bildiriyor, yani gevşeme iş akışı düzeyinde
+  sınırlı kalıyor. `can_approve_pull_request_reviews` kapalı bırakıldı.
+
+  v0.1.0 bu yüzden **elle** yayınlandı (yerel derlemedeki paketler yüklendi;
+  indirilen dosyanın SHA-256'sı yerel paketle birebir aynı doğrulandı).
+  İş akışının sürüm oluşturma adımı bir sonraki etikette sınanacak.
 - `.github/workflows/pages.yml` — `site/` klasörünü GitHub Pages'e yayınlıyor.
   Ekran görüntüsü, ikon ve fontlar depodaki tek kopyadan kopyalanıyor.
 
