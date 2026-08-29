@@ -4,10 +4,12 @@
 //! ayağa kaldırmak, ilerleme olaylarını frontend'e köprülemek ve komutları
 //! kaydetmek. İş mantığı burada değil — [`download`] ve [`settings`] içinde.
 
+pub mod clipboard;
 pub mod commands;
 pub mod download;
 pub mod extension_bridge;
 pub mod settings;
+pub mod update;
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -23,6 +25,13 @@ use settings::AppSettings;
 
 /// Frontend'in dinlediği ilerleme olayı.
 pub const PROGRESS_EVENT: &str = "muiget://progress";
+
+/// Panoda yakalanan indirilebilir bağlantı (karar #24). Yük: adresin kendisi.
+pub const CLIPBOARD_EVENT: &str = "muiget://clipboard";
+
+/// Pano yoklama aralığı. Saniyede bir okumak kullanıcıya anlık geliyor ve
+/// maliyeti bir sistem çağrısı; daha sık yoklamanın karşılığı yok.
+const CLIPBOARD_INTERVAL: Duration = Duration::from_millis(1200);
 
 /// Zaman bazlı hız kurallarının yeniden değerlendirilme aralığı.
 /// Dakikada bir yeterli: kurallar dakika çözünürlüğünde tanımlanıyor.
@@ -50,6 +59,9 @@ pub fn run() {
         // Pencere kapalıyken/odakta değilken indirme bitişini duyurmak için.
         // Arayüz içi toast pencere görünmüyorken hiç kimseye ulaşmıyor.
         .plugin(tauri_plugin_notification::init())
+        // Pano izleme yalnızca Rust tarafında; arayüze pano okuma izni
+        // verilmedi (bkz. `capabilities/default.json`).
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -124,6 +136,12 @@ pub fn run() {
                 }
             });
 
+            // Pano izleyicisi. Ayar kapalıyken de dönüyor ama panoyu hiç
+            // okumuyor: anahtarın açılması uygulamayı yeniden başlatmayı
+            // gerektirmesin diye.
+            let pano_handle = handle.clone();
+            tauri::async_runtime::spawn(pano_izle(pano_handle));
+
             kur_tepsi(app.handle(), manager.clone())?;
 
             app.manage(AppState {
@@ -173,9 +191,65 @@ pub fn run() {
             commands::engine_defaults,
             commands::reveal_in_folder,
             commands::install_native_host,
+            commands::file_checksum,
+            commands::find_duplicate,
+            commands::check_for_update,
+            commands::open_external,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Panoyu izler; indirilebilir bir bağlantı görürse arayüze haber verir.
+///
+/// Neden Rust tarafında (arayüzde `navigator.clipboard` yerine): webview'in
+/// pano okuması pencerenin odakta olmasını gerektiriyor. Oysa bu özelliğin
+/// bütün anlamı, kullanıcı **tarayıcıdayken** kopyaladığı adresi yakalamak.
+///
+/// Okunan metin filtreden geçmezse hiçbir yere yazılmıyor; eşleşen adres de
+/// indirmeyi başlatmıyor, yalnızca arayüzde öneri çıkarıyor.
+async fn pano_izle(handle: tauri::AppHandle) {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    let mut aralik = tokio::time::interval(CLIPBOARD_INTERVAL);
+    let mut son_gorulen = String::new();
+    // Uygulama açıldığında panoda duran şey kullanıcının o an kopyaladığı bir
+    // adres değil. İlk okuma yalnızca hafızayı dolduruyor; anahtar kapatılıp
+    // açıldığında da aynısı geçerli.
+    let mut ilk_okuma = true;
+
+    loop {
+        aralik.tick().await;
+
+        let durum = handle.try_state::<AppState>();
+        let Some(durum) = durum else { continue };
+
+        if !durum.settings_snapshot().clipboard_watch {
+            son_gorulen.clear();
+            ilk_okuma = true;
+            continue;
+        }
+
+        // Panoda metin yoksa (resim, dosya) hata dönüyor; bu normal.
+        let Ok(metin) = handle.clipboard().read_text() else { continue };
+        if metin == son_gorulen {
+            continue;
+        }
+        son_gorulen = metin.clone();
+        if ilk_okuma {
+            ilk_okuma = false;
+            continue;
+        }
+
+        let Some(url) = clipboard::indirilebilir_baglanti(&metin) else { continue };
+        // Zaten listedeyse sormaya gerek yok (karar #22).
+        if durum.manager.find_by_url(&url).is_some() {
+            continue;
+        }
+
+        log::info!("panoda indirilebilir bağlantı yakalandı: {url}");
+        let _ = handle.emit(CLIPBOARD_EVENT, url);
+    }
 }
 
 /// Diskte kalan yarım indirmeleri listeye geri yükler; ayar açıksa sürdürür.

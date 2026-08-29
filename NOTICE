@@ -106,6 +106,25 @@ tauri-plugin-notification — işletim sistemi bildirimleri
   Apache-2.0), macOS'ta mac-notification-sys (MIT).
 
 --------------------------------------------------------------------------------
+tauri-plugin-clipboard-manager — pano izleme
+  Copyright (c) 2019-2026 Tauri Programme within The Commons Conservancy
+  License: Apache License 2.0 OR MIT
+  https://github.com/tauri-apps/plugins-workspace
+
+--------------------------------------------------------------------------------
+sha2 — SHA-2 hash functions (RustCrypto)
+  Copyright (c) 2006-2009 Graydon Hoare, 2009-2013 Mozilla Foundation,
+  RustCrypto Developers
+  License: Apache License 2.0 OR MIT
+  https://github.com/RustCrypto/hashes
+
+--------------------------------------------------------------------------------
+md-5 — MD5 hash function (RustCrypto)
+  Copyright (c) RustCrypto Developers
+  License: Apache License 2.0 OR MIT
+  https://github.com/RustCrypto/hashes
+
+--------------------------------------------------------------------------------
 rustls — TLS implementation (used by reqwest)
   Copyright (c) 2016 Joseph Birr-Pixton
   License: Apache License 2.0 OR ISC OR MIT

@@ -28,7 +28,8 @@ interface Props {
   onContextMenu: (event: MouseEvent, id: string) => void;
 }
 
-const DURUM_METNI: Record<DownloadStatus, string> = {
+/** Kopya uyarısı da aynı adları kullanıyor (`AddDialog`), o yüzden dışa açık. */
+export const DURUM_METNI: Record<DownloadStatus, string> = {
   queued: 'Sırada',
   probing: 'Sunucu yoklanıyor',
   running: 'İniyor',

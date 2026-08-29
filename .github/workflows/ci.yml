@@ -64,3 +64,44 @@ jobs:
       - name: cargo clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
+
+  # Linux derlemesi yayın iş akışına eklendi; bunun ilk kez bir etiket
+  # atıldığında denenmesi, yayını kırılgan hâle getirirdi. Burada yalnızca
+  # `cargo check`: testler Windows işinde zaten koşuyor ve aynı motoru iki kez
+  # sınamanın karşılığı, CI süresini ikiye katlamaya değmiyor.
+  linux:
+    name: Linux derlemesi (cargo check)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sistem bağımlılıkları
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential \
+            file
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: linux
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --all-targets

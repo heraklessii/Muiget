@@ -34,6 +34,19 @@ pub struct AppSettings {
     /// tıklık iş.
     #[serde(default)]
     pub resume_on_start: bool,
+    /// Panoya kopyalanan bağlantıyı yakalayıp indirme önersin mi (karar #24).
+    ///
+    /// Varsayılan kapalı: panoyu sürekli okumak, kullanıcının kopyaladığı her
+    /// şeyi görmek demek. Böyle bir yeteneğin sessizce açık gelmesi bu projede
+    /// yanlış olurdu.
+    #[serde(default)]
+    pub clipboard_watch: bool,
+    /// Açılışta GitHub'daki son sürüme baksın mı (karar #23).
+    ///
+    /// Uygulamanın kendiliğinden yaptığı **tek** dış istek bu. Kullanıcı verisi
+    /// taşımıyor; yine de kapatılabiliyor.
+    #[serde(default = "varsayilan_dogru")]
+    pub check_updates: bool,
     /// Motor ayarları — segment sayısı, hız sınırı, zaman kuralları.
     #[serde(default)]
     pub engine: ManagerConfig,
@@ -57,6 +70,8 @@ impl AppSettings {
             minimize_to_tray: true,
             notify_on_complete: true,
             resume_on_start: false,
+            clipboard_watch: false,
+            check_updates: true,
             engine: ManagerConfig::default(),
             extension_ids: Vec::new(),
         }
@@ -119,6 +134,7 @@ impl AppSettings {
         if self.engine.user_agent.trim().is_empty() {
             self.engine.user_agent = crate::download::http::DEFAULT_USER_AGENT.to_string();
         }
+        self.engine.proxy = normalize_proxy(&self.engine.proxy);
         if self.theme != "light" {
             self.theme = "dark".to_string();
         }
@@ -135,6 +151,32 @@ impl AppSettings {
         self.extension_ids.retain(|id| gecerli_uzanti_kimligi(id));
         self.extension_ids.dedup();
     }
+}
+
+/// Proxy adresini kullanılabilir hâle getirir (karar #19).
+///
+/// Şemasız yazılan `10.0.0.1:8080` gibi adresler `http://` sayılıyor — insanlar
+/// vekil adresini böyle not ediyor ve şema istemek gereksiz bir tökezleme
+/// noktası. Desteklenmeyen şemalar **boşaltılıyor**: geçersiz bir vekille
+/// istemci hiç kurulamaz ve uygulama indirme yapamaz hâle gelirdi; sessizce
+/// doğrudan bağlanmak, çalışmayan bir yapılandırmadan iyi.
+fn normalize_proxy(raw: &str) -> String {
+    let temiz = raw.trim();
+    if temiz.is_empty() {
+        return String::new();
+    }
+
+    let Some((sema, kalan)) = temiz.split_once("://") else {
+        return format!("http://{temiz}");
+    };
+
+    const DESTEKLENEN: [&str; 5] = ["http", "https", "socks5", "socks5h", "socks4"];
+    if kalan.is_empty() || !DESTEKLENEN.contains(&sema.to_ascii_lowercase().as_str()) {
+        log::warn!("proxy adresi kullanılamadı, doğrudan bağlanılacak: {temiz}");
+        return String::new();
+    }
+
+    temiz.to_string()
 }
 
 /// Chrome uzantı kimliği: tam 32 karakter, yalnızca `a`–`p` arası küçük harf.
@@ -199,6 +241,45 @@ mod tests {
 
         assert_eq!(a.engine.bandwidth_rules[0].start_minute, 1439);
         assert_eq!(a.engine.bandwidth_rules[0].end_minute, 1440);
+    }
+
+    #[test]
+    fn proxy_semasiz_adrese_http_ekliyor() {
+        assert_eq!(normalize_proxy("10.0.0.1:8080"), "http://10.0.0.1:8080");
+        assert_eq!(normalize_proxy("  vekil.local:3128  "), "http://vekil.local:3128");
+    }
+
+    #[test]
+    fn proxy_desteklenen_semalari_koruyor() {
+        for adres in [
+            "http://vekil:8080",
+            "https://vekil:8443",
+            "socks5://127.0.0.1:1080",
+            "socks5h://127.0.0.1:1080",
+            "http://ali:gizli@vekil:8080",
+        ] {
+            assert_eq!(normalize_proxy(adres), adres);
+        }
+    }
+
+    #[test]
+    fn proxy_desteklenmeyen_sema_bosaltiliyor() {
+        assert_eq!(normalize_proxy("ftp://vekil:21"), "");
+        assert_eq!(normalize_proxy("socks5://"), "");
+        assert_eq!(normalize_proxy(""), "");
+        assert_eq!(normalize_proxy("   "), "");
+    }
+
+    #[test]
+    fn normalize_proxy_ayarini_da_temizliyor() {
+        let mut a = ornek();
+        a.engine.proxy = "  vekil.local:3128 ".into();
+        a.normalize();
+        assert_eq!(a.engine.proxy, "http://vekil.local:3128");
+
+        a.engine.proxy = "ftp://olmaz".into();
+        a.normalize();
+        assert_eq!(a.engine.proxy, "", "geçersiz vekil doğrudan bağlantıya düşmeli");
     }
 
     #[test]
@@ -279,6 +360,9 @@ mod tests {
         assert_eq!(a.theme, "light");
         assert_eq!(a.engine.segments, 8, "eksik motor ayarı varsayılandan gelmeli");
         assert!(a.minimize_to_tray);
+        assert!(a.check_updates, "eksik alan varsayılan olarak açık gelmeli");
+        assert!(!a.clipboard_watch, "pano izleme eksik alanda kapalı gelmeli");
+        assert_eq!(a.engine.proxy, "", "eksik alanda doğrudan bağlantı");
     }
 
     #[tokio::test]

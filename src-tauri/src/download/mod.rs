@@ -5,6 +5,7 @@
 //! | Modül        | Sorumluluk                                                  |
 //! |--------------|-------------------------------------------------------------|
 //! | [`http`]     | Sunucu yeteneklerini öğrenme (Range desteği, boyut, ad)     |
+//! | [`checksum`] | İnen dosyanın SHA-256 / MD5 özeti (istek üzerine)           |
 //! | [`segmenter`]| Dosyayı byte aralıklarına bölme planı                        |
 //! | [`writer`]   | Sparse dosya + kendi offsetine yazan segment yazıcısı        |
 //! | [`resume`]   | `.muiget` meta dosyası, kaldığı yerden devam                 |
@@ -16,6 +17,7 @@
 //! Mimari kararların gerekçesi için `docs/decisions.md` #3, #4, #5.
 
 pub mod category;
+pub mod checksum;
 pub mod http;
 pub mod manager;
 pub mod resume;

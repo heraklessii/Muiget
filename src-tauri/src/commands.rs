@@ -39,8 +39,22 @@ pub async fn probe_url(state: State<'_, AppState>, url: String) -> Result<Server
     let client = crate::download::http::build_client(
         &ayarlar.engine.user_agent,
         std::time::Duration::from_secs(ayarlar.engine.connect_timeout_secs),
+        Some(ayarlar.engine.proxy.as_str()),
     )?;
-    crate::download::http::probe(&client, &url).await
+
+    // Yoklama da indirmeyle aynı yolu izliyor: adresteki kimlik ayrılıp
+    // başlığa taşınıyor, yoksa korumalı bir adres diyalogda 401 gösterirdi.
+    let (temiz, kimlik) = crate::download::http::split_credentials(&url);
+    let basliklar: Vec<(String, String)> = kimlik
+        .map(|(k, p)| {
+            vec![(
+                "Authorization".to_string(),
+                crate::download::http::basic_auth_value(&k, &p),
+            )]
+        })
+        .unwrap_or_default();
+
+    crate::download::http::probe_with(&client, &temiz, &basliklar).await
 }
 
 #[tauri::command]
@@ -164,6 +178,83 @@ pub fn install_native_host(extension_ids: Vec<String>, state: State<'_, AppState
         .map_err(DownloadError::Io)?;
 
     Ok(yol.to_string_lossy().into_owned())
+}
+
+/// İnen dosyanın özetini hesaplar (karar #21).
+///
+/// `algorithm`: `sha256` (varsayılan) ya da `md5`. Büyük dosyada saniyeler
+/// sürebilir; arayüz bu yüzden komutu "hesaplanıyor" göstergesiyle çağırıyor.
+#[tauri::command]
+pub async fn file_checksum(
+    state: State<'_, AppState>,
+    id: String,
+    algorithm: Option<String>,
+) -> Result<String> {
+    use crate::download::checksum::{self, Algorithm};
+
+    let algoritma = match algorithm.as_deref() {
+        Some(ad) => Algorithm::parse(ad)?,
+        None => Algorithm::Sha256,
+    };
+
+    let indirme = state
+        .manager
+        .get(&id)
+        .ok_or_else(|| DownloadError::NotFound(id.clone()))?;
+
+    // Yarım dosyanın özeti anlamsız: kullanıcı onu sitedeki değerle
+    // karşılaştırıp "indirme bozuk" sanardı.
+    if indirme.status != crate::download::manager::DownloadStatus::Completed {
+        return Err(DownloadError::Other(
+            "özet yalnızca tamamlanmış indirme için hesaplanabilir".into(),
+        ));
+    }
+
+    checksum::compute(&PathBuf::from(&indirme.target_path), algoritma).await
+}
+
+/// Bu adres listede zaten var mı (karar #22). Varsa mevcut kaydı döner.
+#[tauri::command]
+pub fn find_duplicate(state: State<'_, AppState>, url: String) -> Option<DownloadSnapshot> {
+    state.manager.find_by_url(&url)
+}
+
+/// GitHub'daki son yayına bakar (karar #23).
+///
+/// Ağ hatası da hata olarak dönüyor; arayüz sessizce yutuyor. Sürüm
+/// kontrolünün başarısız olması kullanıcıyı ilgilendiren bir olay değil.
+#[tauri::command]
+pub async fn check_for_update(state: State<'_, AppState>) -> Result<crate::update::UpdateInfo> {
+    let ayarlar = state.settings_snapshot();
+    let client = crate::download::http::build_client(
+        &ayarlar.engine.user_agent,
+        std::time::Duration::from_secs(ayarlar.engine.connect_timeout_secs),
+        Some(ayarlar.engine.proxy.as_str()),
+    )?;
+    crate::update::check(&client, env!("CARGO_PKG_VERSION")).await
+}
+
+/// Adresi kullanıcının varsayılan tarayıcısında açar.
+///
+/// Yalnızca `https://` kabul ediliyor: bu komut arayüzden çağrılıyor ve
+/// keyfi bir şemayı işletim sistemine devretmek (`file:`, `cmd:`) gereksiz
+/// bir yüzey açardı. Şu an tek kullanıcısı güncelleme bildirimi.
+///
+/// `capabilities/default.json`'a `opener:allow-open-url` **eklenmedi**: o izin
+/// eklentinin kendi IPC komutunu arayüze açar. Buradaki çağrı Rust tarafından
+/// yapılıyor ve eklentinin Rust API'si izin denetimi uygulamıyor — yani izin
+/// eklemek yalnızca yüzeyi genişletirdi.
+#[tauri::command]
+pub fn open_external(app: tauri::AppHandle, url: String) -> Result<()> {
+    use tauri_plugin_opener::OpenerExt;
+
+    if !url.starts_with("https://") {
+        return Err(DownloadError::InvalidUrl(url));
+    }
+
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| DownloadError::Other(format!("adres açılamadı: {e}")))
 }
 
 /// Dosyayı işletim sisteminin dosya yöneticisinde gösterir.

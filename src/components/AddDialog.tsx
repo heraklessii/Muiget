@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
-import { errorMessage, probeUrl } from '../lib/api';
+import { errorMessage, findDuplicate, probeUrl } from '../lib/api';
+import { DURUM_METNI } from './DownloadRow';
 import { formatBytes } from '../lib/format';
-import type { ServerCapabilities } from '../lib/types';
+import type { DownloadSnapshot, ServerCapabilities } from '../lib/types';
 import { IconClose, IconFolder } from './Icons';
 
 interface Props {
@@ -38,6 +39,8 @@ export function AddDialog({
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  /** Aynı adres listede varsa o kayıt (karar #22). Engel değil, uyarı. */
+  const [kopya, setKopya] = useState<DownloadSnapshot | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -78,6 +81,7 @@ export function AddDialog({
     if (toplu || !/^https?:\/\/\S+$/i.test(kirpilmis)) {
       setCaps(null);
       setProbeError(null);
+      setKopya(null);
       return;
     }
 
@@ -85,6 +89,15 @@ export function AddDialog({
     const zamanlayici = window.setTimeout(() => {
       setProbing(true);
       setProbeError(null);
+
+      // Kopya kontrolü yoklamadan bağımsız: sunucu yanıt vermese bile
+      // "bu dosya zaten listede" bilgisi doğru ve gösterilmeye değer.
+      findDuplicate(kirpilmis).then(
+        (mevcut) => {
+          if (!iptal) setKopya(mevcut);
+        },
+        () => {},
+      );
 
       probeUrl(kirpilmis)
         .then((sonuc) => {
@@ -176,6 +189,14 @@ export function AddDialog({
               <strong>{adresler.length} bağlantı</strong> bulundu. Hepsi kuyruğa alınacak;
               eşzamanlı indirme sınırı ayarlardan geliyor. Toplu eklemede sunucu
               önizlemesi gösterilmiyor.
+            </p>
+          )}
+
+          {kopya && (
+            <p className="field-hint" style={{ color: 'var(--warning)' }}>
+              Bu adres listede zaten var: <strong>{kopya.fileName}</strong> (
+              {DURUM_METNI[kopya.status].toLocaleLowerCase('tr')}). Yine de
+              indirebilirsiniz; dosya adı çakışırsa yanına numara eklenir.
             </p>
           )}
 

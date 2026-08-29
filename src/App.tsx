@@ -8,6 +8,7 @@ import {
   IconCopy,
   IconDownload,
   IconFolder,
+  IconHash,
   IconLink,
   IconMoon,
   IconPause,
@@ -35,6 +36,17 @@ import {
   type DownloadSnapshot,
   type DownloadStatus,
 } from './lib/types';
+
+/**
+ * Adresin son parçası — bildirimde tam URL yerine dosya adını göstermek için.
+ * Sunucunun vereceği gerçek ad farklı olabilir; burada amaç yalnızca
+ * kullanıcının neyi kopyaladığını tanıması.
+ */
+function urlDosyaAdi(url: string): string {
+  const yol = url.split(/[?#]/)[0];
+  const son = yol.split('/').pop() ?? '';
+  return decodeURIComponent(son) || url;
+}
 
 type Filtre = 'tumu' | 'aktif' | 'tamamlanan';
 
@@ -109,6 +121,49 @@ export default function App() {
       window.clearInterval(zaman);
     };
   }, [settings]);
+
+  // --- Panoda yakalanan bağlantı (karar #24) ---
+  //
+  // Motor yalnızca haber veriyor; indirme kendiliğinden başlamıyor. Kopyalanan
+  // her adresi sessizce indirmeye başlamak, kullanıcının istemediği dosyaları
+  // diske yazmak olurdu. Bildirimdeki düğme yeni indirme kutusunu dolu açıyor.
+  useEffect(() => {
+    const abonelik = api.onClipboardLink((url) => {
+      push('info', `Panoda bağlantı: ${urlDosyaAdi(url)}`, {
+        label: 'İndir',
+        onSelect: () => {
+          setBirakilanUrl(url);
+          setAddAcik(true);
+        },
+      });
+    });
+
+    return () => {
+      void abonelik.then((bitir) => bitir());
+    };
+  }, [push]);
+
+  // --- Yeni sürüm kontrolü (karar #23) ---
+  //
+  // Oturumda bir kez, ayar açıksa. Hata yutuluyor: sürüm kontrolünün
+  // başarısız olması kullanıcıyı ilgilendiren bir olay değil ve çevrimdışı
+  // açılışta her seferinde hata göstermek rahatsız edici olurdu.
+  const surumBakildi = useRef(false);
+  useEffect(() => {
+    if (!settings?.checkUpdates || surumBakildi.current) return;
+    surumBakildi.current = true;
+
+    api.checkForUpdate().then(
+      (bilgi) => {
+        if (!bilgi.available) return;
+        push('info', `Yeni sürüm çıktı: v${bilgi.latest} (kurulu: v${bilgi.current})`, {
+          label: 'Yayına git',
+          onSelect: () => void api.openExternal(bilgi.url).catch(() => {}),
+        });
+      },
+      () => {},
+    );
+  }, [settings, push]);
 
   // --- Biten ve başarısız olan indirmeleri duyur ---
   //
@@ -481,6 +536,29 @@ export default function App() {
   );
 
   /**
+   * İnen dosyanın SHA-256 özetini hesaplayıp gösterir (karar #21).
+   *
+   * Büyük dosyada saniyeler sürüyor, o yüzden önce "hesaplanıyor" bildirimi
+   * çıkıyor: tıklamanın hiçbir şey yapmadığı izlenimi vermemek için. Sonuç
+   * kopyalanabilir; kullanıcı onu sitedeki değerle karşılaştıracak.
+   */
+  const ozetHesapla = useCallback(
+    (indirme: DownloadSnapshot) => {
+      push('info', `${indirme.fileName} — SHA-256 hesaplanıyor…`);
+      api.fileChecksum(indirme.id, 'sha256').then(
+        (ozet) => {
+          push('success', `SHA-256: ${ozet}`, {
+            label: 'Kopyala',
+            onSelect: () => kopyala(ozet, 'Özet'),
+          });
+        },
+        (e) => push('error', `Özet hesaplanamadı: ${api.errorMessage(e)}`),
+      );
+    },
+    [kopyala, push],
+  );
+
+  /**
    * Sağ tık menüsünün içeriği.
    *
    * Menü duruma göre kısalıyor: tamamlanmış bir indirmede "Duraklat",
@@ -530,6 +608,13 @@ export default function App() {
         separated: true,
         onSelect: () => klasordeGoster(indirme.targetPath),
       });
+      // Özet yalnızca tamamlanmış dosyada anlamlı: yarım dosyanın özeti,
+      // kullanıcıya "indirme bozuk" dedirtirdi.
+      ogeler.push({
+        label: 'SHA-256 hesapla',
+        icon: <IconHash />,
+        onSelect: () => ozetHesapla(indirme),
+      });
     }
 
     if (['completed', 'failed', 'cancelled'].includes(indirme.status)) {
@@ -549,7 +634,17 @@ export default function App() {
     });
 
     return ogeler;
-  }, [menu, downloads, kopyala, duraklat, devamEt, klasordeGoster, yenidenIndir, kaldir]);
+  }, [
+    menu,
+    downloads,
+    kopyala,
+    duraklat,
+    devamEt,
+    klasordeGoster,
+    ozetHesapla,
+    yenidenIndir,
+    kaldir,
+  ]);
 
   return (
     <div className="shell">

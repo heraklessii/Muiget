@@ -229,6 +229,43 @@ export function SettingsDialog({ settings, onClose, onSave, onSaveQuiet, onResca
             />
           </div>
 
+          <div className="field row">
+            <span>
+              Panodaki bağlantıları yakala
+              <br />
+              <span className="field-hint">
+                Kopyaladığınız adres indirilebilir bir dosyaya işaret ediyorsa Muiget
+                sorar. <strong>Açıkken uygulama panonuzu saniyede bir okur</strong> —
+                indirme bağlantısı olmayan içerik anında elenir, hiçbir yere yazılmaz.
+              </span>
+            </span>
+            <button
+              className="switch"
+              role="switch"
+              aria-checked={taslak.clipboardWatch}
+              aria-label="Panodaki bağlantıları yakala"
+              onClick={() => setTaslak((o) => ({ ...o, clipboardWatch: !o.clipboardWatch }))}
+            />
+          </div>
+
+          <div className="field row">
+            <span>
+              Açılışta yeni sürüme bak
+              <br />
+              <span className="field-hint">
+                Uygulamanın kendiliğinden yaptığı tek dış istek: GitHub'daki son yayın
+                numarası. Kullanıcı verisi gönderilmez.
+              </span>
+            </span>
+            <button
+              className="switch"
+              role="switch"
+              aria-checked={taslak.checkUpdates}
+              aria-label="Açılışta yeni sürüme bak"
+              onClick={() => setTaslak((o) => ({ ...o, checkUpdates: !o.checkUpdates }))}
+            />
+          </div>
+
           {/* ---- Bağlantı ---- */}
           <h3 className="section-title">Bağlantı</h3>
 
@@ -346,6 +383,28 @@ export function SettingsDialog({ settings, onClose, onSave, onSaveQuiet, onResca
               onClick={() => motoruGuncelle({ categorize: !taslak.engine.categorize })}
             />
           </div>
+
+          <label className="field row">
+            <span>
+              Vekil sunucu (proxy)
+              <br />
+              <span className="field-hint">
+                Boş bırakılırsa doğrudan bağlanılır. Örnek:{' '}
+                <code>http://10.0.0.1:8080</code>, <code>socks5://127.0.0.1:1080</code>.
+                Şema yazılmazsa <code>http://</code> varsayılır. Gerekiyorsa kimlik:{' '}
+                <code>http://kullanıcı:parola@sunucu:port</code>.
+              </span>
+            </span>
+            <input
+              className="text-input"
+              style={{ width: 240 }}
+              value={taslak.engine.proxy}
+              onChange={(e) => motoruGuncelle({ proxy: e.target.value })}
+              placeholder="doğrudan bağlantı"
+              spellCheck={false}
+              autoComplete="off"
+            />
+          </label>
 
           {/* ---- Hız ---- */}
           <h3 className="section-title">Hız sınırı</h3>

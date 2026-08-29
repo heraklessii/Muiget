@@ -62,6 +62,14 @@ export interface BandwidthRule {
   enabled: boolean;
 }
 
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  /** Yayının GitHub sayfası. */
+  url: string;
+  available: boolean;
+}
+
 export interface ManagerConfig {
   segments: number;
   minSegmentSize: number;
@@ -78,6 +86,8 @@ export interface ManagerConfig {
   userAgent: string;
   connectTimeoutSecs: number;
   readTimeoutSecs: number;
+  /** Vekil sunucu. Boş = doğrudan bağlantı. `http://`, `socks5://`… */
+  proxy: string;
 }
 
 export interface AppSettings {
@@ -87,6 +97,10 @@ export interface AppSettings {
   notifyOnComplete: boolean;
   /** Açılışta diskten geri yüklenen yarım indirmeler kendiliğinden sürsün mü. */
   resumeOnStart: boolean;
+  /** Panoya kopyalanan bağlantı yakalansın mı. Varsayılan kapalı. */
+  clipboardWatch: boolean;
+  /** Açılışta yeni sürüm var mı diye bakılsın mı. */
+  checkUpdates: boolean;
   engine: ManagerConfig;
   /** Native messaging köprüsünü kullanabilecek Chrome uzantısı kimlikleri. */
   extensionIds: string[];

@@ -14,10 +14,14 @@ import type {
   DownloadSnapshot,
   ManagerConfig,
   ServerCapabilities,
+  UpdateInfo,
 } from './types';
 
 /** `src-tauri/src/lib.rs` → `PROGRESS_EVENT` ile aynı olmak zorunda. */
 export const PROGRESS_EVENT = 'muiget://progress';
+
+/** `src-tauri/src/lib.rs` → `CLIPBOARD_EVENT`. Yük: yakalanan adres. */
+export const CLIPBOARD_EVENT = 'muiget://clipboard';
 
 export function appVersion(): Promise<string> {
   return invoke<string>('app_version');
@@ -91,6 +95,34 @@ export function installNativeHost(extensionIds: string[]): Promise<string> {
 
 export function revealInFolder(path: string): Promise<void> {
   return invoke('reveal_in_folder', { path });
+}
+
+/**
+ * Tamamlanmış bir indirmenin özetini hesaplar (küçük harfli hex).
+ * Büyük dosyada saniyeler sürebilir.
+ */
+export function fileChecksum(id: string, algorithm: 'sha256' | 'md5' = 'sha256'): Promise<string> {
+  return invoke<string>('file_checksum', { id, algorithm });
+}
+
+/** Bu adres listede zaten var mı? Varsa mevcut kayıt döner. */
+export function findDuplicate(url: string): Promise<DownloadSnapshot | null> {
+  return invoke<DownloadSnapshot | null>('find_duplicate', { url });
+}
+
+/** GitHub'daki son yayına bakar. Ağ hatasında reddediyor; arayüz yutuyor. */
+export function checkForUpdate(): Promise<UpdateInfo> {
+  return invoke<UpdateInfo>('check_for_update');
+}
+
+/** Adresi kullanıcının tarayıcısında açar (yalnızca `https://`). */
+export function openExternal(url: string): Promise<void> {
+  return invoke('open_external', { url });
+}
+
+/** Panoda yakalanan bağlantıları dinler. Dönen fonksiyon aboneliği bitirir. */
+export function onClipboardLink(handler: (url: string) => void): Promise<UnlistenFn> {
+  return listen<string>(CLIPBOARD_EVENT, (event) => handler(event.payload));
 }
 
 /** Motorun ilerleme yayınına abone olur. Dönen fonksiyon aboneliği bitirir. */

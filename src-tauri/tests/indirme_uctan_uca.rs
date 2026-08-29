@@ -38,11 +38,16 @@ enum SunucuKipi {
     /// içinde iniyor ve indirme, iptal komutu gelmeden bitiyordu. Yavaş sunucu
     /// bu testleri zamanlamaya bağlı olmaktan çıkarıyor.
     Yavas,
+    /// `Authorization: Basic YWxpOmdpemxp` (ali:gizli) istiyor, yoksa 401.
+    KimlikIster,
 }
+
+/// [`SunucuKipi::KimlikIster`] kipinin beklediği başlık değeri — `ali:gizli`.
+const BEKLENEN_KIMLIK: &str = "Basic YWxpOmdpemxp";
 
 impl SunucuKipi {
     fn range_destekli(self) -> bool {
-        matches!(self, SunucuKipi::RangeDestekli | SunucuKipi::Yavas)
+        matches!(self, SunucuKipi::RangeDestekli | SunucuKipi::Yavas | SunucuKipi::KimlikIster)
     }
 }
 
@@ -105,6 +110,28 @@ async fn baglantiyi_isle(
         .lines()
         .find(|l| l.to_ascii_lowercase().starts_with("range:"))
         .and_then(|l| l.split_once(':').map(|(_, v)| v.trim().to_string()));
+
+    // Korumalı sunucu: kimlik başlığı yoksa gövde hiç gönderilmiyor.
+    if kip == SunucuKipi::KimlikIster {
+        let kimlik_var = istek
+            .lines()
+            .filter_map(|l| l.split_once(':'))
+            .any(|(ad, deger)| {
+                // Şema adı büyük/küçük harfe duyarsız, base64 yükü değil.
+                ad.trim().eq_ignore_ascii_case("authorization")
+                    && deger.trim() == BEKLENEN_KIMLIK
+            });
+
+        if !kimlik_var {
+            let yanit = "HTTP/1.1 401 Unauthorized\r\n\
+                 Content-Length: 0\r\n\
+                 WWW-Authenticate: Basic realm=\"test\"\r\n\
+                 Connection: close\r\n\r\n";
+            stream.write_all(yanit.as_bytes()).await?;
+            stream.flush().await?;
+            return stream.shutdown().await;
+        }
+    }
 
     let toplam = icerik.len();
     let accept_ranges = if kip.range_destekli() { "bytes" } else { "none" };
@@ -780,4 +807,105 @@ async fn kategori_acikken_taninmayan_tur_kokte_kaliyor() {
     // derine gömmek, aramayı zorlaştırmaktan başka bir şey yapmazdı.
     let hedef = PathBuf::from(&snapshot.target_path);
     assert_eq!(hedef.parent(), Some(dir.path()), "kökte kalmalıydı: {}", hedef.display());
+}
+
+/// Adrese gömülü `kullanıcı:parola@` gerçekten korumalı bir sunucudan dosya
+/// indiriyor mu (karar #20)?
+///
+/// Birim test kimliğin ayrıldığını gösteriyor; buradaki soru başlığın
+/// **her segment isteğine** eklenip eklenmediği. Tek bir segmentte unutulsa
+/// 401 gelir ve dosya yarım kalırdı.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn adrese_gomulu_kimlikle_indirme_calisiyor() {
+    const BOYUT: usize = 256 * 1024;
+    let icerik = beklenen_icerik(BOYUT);
+    let sunucu = TestSunucusu::baslat(icerik.clone(), SunucuKipi::KimlikIster).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let manager = DownloadManager::new(test_config(4)).unwrap();
+
+    // `http://ali:gizli@127.0.0.1:PORT/korumali.bin`
+    let url = sunucu.url("/korumali.bin").replace("http://", "http://ali:gizli@");
+    let id = manager.start(url, dir.path().to_path_buf()).unwrap();
+
+    let durum = tamamlanmayi_bekle(&manager, &id).await;
+    let snapshot = manager.get(&id).unwrap();
+    assert_eq!(durum, DownloadStatus::Completed, "hata: {:?}", snapshot.error);
+    assert!(snapshot.segments.len() > 1, "korumalı sunucu da segmentlenebilmeli");
+
+    let yazilan = tokio::fs::read(&snapshot.target_path).await.unwrap();
+    assert!(yazilan == icerik, "dosya içeriği bozuk");
+
+    // Parola listede, log'da ve metada görünmemeli.
+    assert!(!snapshot.url.contains("gizli"), "parola arayüze sızdı: {}", snapshot.url);
+    assert!(!snapshot.url.contains('@'), "kimlik bölümü adreste kaldı: {}", snapshot.url);
+}
+
+/// Aynı sunucu, kimliksiz adres: indirme başarısız olmalı.
+///
+/// Bir önceki testin gerçekten kimlik yüzünden geçtiğini kanıtlıyor; sunucu
+/// her isteği kabul etseydi o test de geçerdi.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn kimliksiz_istek_401_aliyor() {
+    let sunucu = TestSunucusu::baslat(beklenen_icerik(64 * 1024), SunucuKipi::KimlikIster).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let manager = DownloadManager::new(test_config(2)).unwrap();
+
+    let id = manager.start(sunucu.url("/korumali.bin"), dir.path().to_path_buf()).unwrap();
+    let durum = tamamlanmayi_bekle(&manager, &id).await;
+
+    assert_eq!(durum, DownloadStatus::Failed, "kimliksiz indirme başarılı olmamalı");
+}
+
+/// İnen dosyanın özeti gerçekten dosyanın özeti mi (karar #21)?
+///
+/// Birim testler `checksum::compute`'u bilinen vektörlerle sınıyor; buradaki
+/// soru zincirin tamamı: sunucudan inen içerik → diskteki dosya → özet.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn inen_dosyanin_ozeti_bilinen_vektorle_ayni() {
+    use muiget_lib::download::checksum::{compute, Algorithm};
+
+    // İçerik "abc": SHA-256'sı RFC/NIST örneklerinden bilinen bir değer.
+    let sunucu = TestSunucusu::baslat(b"abc".to_vec(), SunucuKipi::RangeDestekli).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let manager = DownloadManager::new(test_config(4)).unwrap();
+
+    let id = manager.start(sunucu.url("/abc.bin"), dir.path().to_path_buf()).unwrap();
+    let durum = tamamlanmayi_bekle(&manager, &id).await;
+    let snapshot = manager.get(&id).unwrap();
+    assert_eq!(durum, DownloadStatus::Completed, "hata: {:?}", snapshot.error);
+
+    let ozet = compute(&PathBuf::from(&snapshot.target_path), Algorithm::Sha256).await.unwrap();
+    assert_eq!(ozet, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+}
+
+/// Aynı adres ikinci kez eklenince kopya olarak bulunuyor mu (karar #22)?
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ayni_adres_kopya_olarak_bulunuyor() {
+    let sunucu = TestSunucusu::baslat(beklenen_icerik(32 * 1024), SunucuKipi::RangeDestekli).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let manager = DownloadManager::new(test_config(2)).unwrap();
+
+    let url = sunucu.url("/kopya.bin");
+    assert!(manager.find_by_url(&url).is_none(), "boş listede kopya olmamalı");
+
+    let id = manager.start(url.clone(), dir.path().to_path_buf()).unwrap();
+    tamamlanmayi_bekle(&manager, &id).await;
+
+    let kopya = manager.find_by_url(&url).expect("aynı adres kopya sayılmalı");
+    assert_eq!(kopya.id, id);
+
+    // Kimlikli yazım da aynı indirmeyi bulmalı: URL metada parolasız duruyor.
+    let kimlikli = url.replace("http://", "http://ali:gizli@");
+    assert_eq!(
+        manager.find_by_url(&kimlikli).map(|s| s.id),
+        Some(id),
+        "kimlik bilgisi kopya tespitini bozmamalı"
+    );
+
+    // Başka bir adres kopya değil.
+    assert!(manager.find_by_url(&sunucu.url("/baska.bin")).is_none());
 }

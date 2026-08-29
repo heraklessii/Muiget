@@ -42,12 +42,27 @@ anahtarı satın alması gerekmeyen, kodunu herkesin okuyup değiştirebildiği 
 - **Tarayıcı entegrasyonu** — Chrome uzantısı ile sağ tık → "Muiget ile indir",
   sayfa taraması ve isteğe bağlı indirme devralma
   ([kurulum](extension/README.md)).
+- **Pano izleme** — Kopyaladığınız adres indirilebilir bir dosyaya işaret
+  ediyorsa Muiget sorar; uzantı kurmadan da çalışır. Varsayılan **kapalı**:
+  panoyu okumak sessizce açılacak bir yetenek değil.
+- **Vekil sunucu** — `http`, `https` ve `socks5` proxy desteği. Kurumsal ağ
+  arkasında da çalışır.
+- **Korumalı bağlantılar** — `https://kullanıcı:parola@site/dosya.zip` biçimi
+  desteklenir; parola listede ve kayıt dosyalarında **saklanmaz**, isteğe
+  `Authorization` başlığı olarak taşınır.
+- **Checksum** — İnen dosyanın SHA-256/MD5 özetini sağ tık menüsünden
+  hesaplayıp sitedeki değerle karşılaştırın. Otomatik değil: büyük dosyada
+  diski baştan sona bir kez daha okumak, istemeyen herkese ödetilecek bir
+  bedel değil.
+- **Kopya uyarısı** — Aynı adresi ikinci kez eklerseniz söyler, ama engellemez.
 - **Torrent** — Magnet link ve `.torrent` desteği (librqbit motoru).
   *Henüz eklenmedi, bkz. yol haritası.*
 - **Küçük** — Tauri v2 + Rust. Windows x64 kurulum paketi **3,4 MB**
   (NSIS; MSI 4,9 MB), kurulu uygulama 14,1 MB. Electron tabanlı bir indirme
   yöneticisi tipik olarak bunun on katından fazlasını kaplıyor.
-- **Telemetri yok** — Hiçbir veri toplanmaz, hiçbir sunucuya bir şey gönderilmez.
+- **Telemetri yok** — Hiçbir veri toplanmaz. Uygulamanın kendiliğinden yaptığı
+  tek dış istek, açılışta GitHub'daki son sürüm numarasına bakmak; o da
+  ayarlardan kapatılabiliyor ve hiçbir kullanıcı verisi taşımıyor.
 
 ## Ne Yapmaz
 
@@ -71,10 +86,20 @@ eşzamanlı indirme._
 
 ## Kurulum
 
-Hazır paket: [Sürümler](https://github.com/heraklessii/Muiget/releases)
-sayfasındaki `Muiget_x.y.z_x64-setup.exe`. Şimdilik yalnızca **Windows x64**
-paketi üretiliyor; Linux ve macOS kaynaktan derlenebilir ama o platformlarda
-henüz denenmedi.
+Hazır paketler: [Sürümler](https://github.com/heraklessii/Muiget/releases)
+
+| Platform | Dosya |
+|---|---|
+| Windows x64 | `Muiget_x.y.z_x64-setup.exe` (NSIS) veya `.msi` |
+| Linux x64 | `.AppImage` (kurulum gerektirmez) veya `.deb` |
+| macOS | `.dmg` (universal — Apple Silicon + Intel) |
+
+**Linux ve macOS paketleri derleniyor ama geliştirici tarafından denenmedi** —
+proje Windows'ta geliştiriliyor. O platformlarda karşılaştığınız sorunları
+issue olarak bildirin.
+
+Paketler **imzasız**: Windows SmartScreen ve macOS Gatekeeper uyarı gösterecek.
+Kod imzalama sertifikası henüz yok.
 
 ### Gereksinimler
 
@@ -120,13 +145,14 @@ Bu seçimlerin gerekçeleri için: [`docs/decisions.md`](docs/decisions.md).
 | 3 | Tauri UI (React) | ✅ Tamamlandı |
 | 4 | Torrent entegrasyonu | ⚪ Ertelendi |
 | 5 | Chrome uzantısı | ✅ Tamamlandı |
-| 6 | HLS/DASH, checksum, opsiyonel virüs taraması | ⚪ Bekliyor |
+| 6 | HLS/DASH, checksum, opsiyonel virüs taraması | 🟡 Checksum bitti |
 | 7 | Plugin sistemi, istatistikler, katkı rehberi | ⚪ Bekliyor |
 
-**Bilinen eksikler:** torrent desteği henüz yok; açılışta yalnızca varsayılan
-indirme klasörü taranıyor (başka klasörler için Ayarlar → "Klasörü tara"); hız,
-gerçek dünyada henüz başka bir indirme yöneticisiyle karşılaştırılmadı;
-işletim sistemi bildirimi kurulu uygulamada henüz denenmedi.
+**Bilinen eksikler:** torrent desteği henüz yok; video sitelerinden HLS/DASH
+(m3u8) akışı indirilemiyor; yalnızca Chrome uzantısı var (Firefox/Edge yok ve
+uzantı mağazada değil); açılışta yalnızca varsayılan indirme klasörü taranıyor
+(başka klasörler için Ayarlar → "Klasörü tara"); hız, gerçek dünyada henüz
+başka bir indirme yöneticisiyle karşılaştırılmadı; kurulum paketleri imzasız.
 
 Detaylı görev listesi: [`docs/tasks.md`](docs/tasks.md).
 

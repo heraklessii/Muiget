@@ -50,7 +50,13 @@ impl ServerCapabilities {
 /// `Accept-Encoding: identity` bilinçli: sunucu gövdeyi sıkıştırırsa okunan
 /// byte sayısı `Content-Length` ve `Range` aralığıyla tutmaz, segment
 /// muhasebesi bozulur ve dosya sessizce yanlış yazılır.
-pub fn build_client(user_agent: &str, connect_timeout: Duration) -> Result<Client> {
+/// `proxy`: `http://`, `https://`, `socks5://` ya da şemasız `host:port`.
+/// Boş dizge ve `None` doğrudan bağlantı demek (karar #19).
+pub fn build_client(
+    user_agent: &str,
+    connect_timeout: Duration,
+    proxy: Option<&str>,
+) -> Result<Client> {
     let mut headers = HeaderMap::new();
     headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
     headers.insert(
@@ -59,14 +65,63 @@ pub fn build_client(user_agent: &str, connect_timeout: Duration) -> Result<Clien
             .map_err(|_| DownloadError::Other("geçersiz User-Agent".into()))?,
     );
 
-    Client::builder()
+    let mut builder = Client::builder()
         .default_headers(headers)
         .connect_timeout(connect_timeout)
         // Toplam timeout YOK: büyük dosyalarda indirme saatler sürebilir.
         // Takılan bağlantıları worker'daki okuma zaman aşımı yakalıyor.
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .build()
-        .map_err(DownloadError::Network)
+        .redirect(reqwest::redirect::Policy::limited(10));
+
+    if let Some(adres) = proxy.map(str::trim).filter(|p| !p.is_empty()) {
+        // `Proxy::all` şemayı kendisi çözüyor; hata mesajı kullanıcıya
+        // gösteriliyor çünkü tek sebebi elle yazılmış bozuk bir adres.
+        let vekil = reqwest::Proxy::all(adres)
+            .map_err(|e| DownloadError::Other(format!("proxy adresi kullanılamadı ({adres}): {e}")))?;
+        builder = builder.proxy(vekil);
+    }
+
+    builder.build().map_err(DownloadError::Network)
+}
+
+/// URL'nin içine gömülü `kullanıcı:parola@` bilgisini ayırır.
+///
+/// `reqwest` bu bilgiyi kendiliğinden `Authorization` başlığına çevirmiyor;
+/// üstelik kimlik bilgisi URL'de kalırsa resume metasına, log'a ve arayüzdeki
+/// listeye parola olarak yazılırdı. Bu yüzden adres daha motorun kapısında
+/// temizleniyor ve kimlik ayrı bir başlığa taşınıyor (karar #20).
+///
+/// Parola içinde `@` geçebildiği için son `@` esas alınıyor; kullanıcı adı ve
+/// parola yüzde kodlamasından çözülüyor (`%40` → `@`).
+pub fn split_credentials(url: &str) -> (String, Option<(String, String)>) {
+    let Some((sema, kalan)) = url.split_once("://") else {
+        return (url.to_string(), None);
+    };
+
+    // Yetki bölümü (`authority`) ilk `/`, `?` ya da `#` işaretine kadar.
+    let son = kalan.find(['/', '?', '#']).unwrap_or(kalan.len());
+    let (yetki, kuyruk) = kalan.split_at(son);
+
+    let Some((kimlik, host)) = yetki.rsplit_once('@') else {
+        return (url.to_string(), None);
+    };
+    if kimlik.is_empty() {
+        // `://@host` — taşınacak bir kimlik yok ama `@` yine de atılmalı.
+        return (format!("{sema}://{host}{kuyruk}"), None);
+    }
+
+    let (kullanici, parola) = match kimlik.split_once(':') {
+        Some((k, p)) => (percent_decode(k), percent_decode(p)),
+        None => (percent_decode(kimlik), String::new()),
+    };
+
+    (format!("{sema}://{host}{kuyruk}"), Some((kullanici, parola)))
+}
+
+/// `Authorization: Basic ...` başlığının değerini üretir (RFC 7617).
+pub fn basic_auth_value(user: &str, password: &str) -> String {
+    use base64::Engine as _;
+    let kodlu = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}"));
+    format!("Basic {kodlu}")
 }
 
 /// Sunucu yeteneklerini öğrenir.
@@ -478,5 +533,79 @@ mod tests {
         let mut sifir = temel;
         sifir.content_length = Some(0);
         assert!(!sifir.can_segment());
+    }
+
+    #[test]
+    fn kimlik_bilgisi_adresten_ayriliyor() {
+        let (url, kimlik) = split_credentials("https://ali:gizli@ornek.com/dosya.zip");
+        assert_eq!(url, "https://ornek.com/dosya.zip");
+        assert_eq!(kimlik, Some(("ali".into(), "gizli".into())));
+    }
+
+    #[test]
+    fn kimliksiz_adres_degismiyor() {
+        let girdi = "https://ornek.com/a@b/dosya.zip?x=1";
+        let (url, kimlik) = split_credentials(girdi);
+        assert_eq!(url, girdi, "yoldaki @ kimlik sanılmamalı");
+        assert_eq!(kimlik, None);
+    }
+
+    #[test]
+    fn parolasiz_kullanici_adi_kabul_ediliyor() {
+        let (url, kimlik) = split_credentials("http://ali@ornek.com/x");
+        assert_eq!(url, "http://ornek.com/x");
+        assert_eq!(kimlik, Some(("ali".into(), String::new())));
+    }
+
+    #[test]
+    fn parolada_ozel_karakter_cozuluyor() {
+        // Parola `p@ss:1` — `@` ve `:` yüzde kodlu geliyor, son `@` sınır.
+        let (url, kimlik) = split_credentials("https://ali:p%40ss%3A1@ornek.com/d.bin");
+        assert_eq!(url, "https://ornek.com/d.bin");
+        assert_eq!(kimlik, Some(("ali".into(), "p@ss:1".into())));
+    }
+
+    #[test]
+    fn bos_kimlik_bolumu_atiliyor() {
+        let (url, kimlik) = split_credentials("https://@ornek.com/d.bin");
+        assert_eq!(url, "https://ornek.com/d.bin");
+        assert_eq!(kimlik, None);
+    }
+
+    #[test]
+    fn sorgu_dizesi_yetki_bolumune_karismiyor() {
+        let (url, kimlik) = split_credentials("https://ali:x@ornek.com?imza=a@b");
+        assert_eq!(url, "https://ornek.com?imza=a@b");
+        assert_eq!(kimlik, Some(("ali".into(), "x".into())));
+    }
+
+    #[test]
+    fn basic_auth_rfc_ornegiyle_ayni() {
+        // RFC 7617'nin kendi örneği: "Aladdin:open sesame".
+        assert_eq!(
+            basic_auth_value("Aladdin", "open sesame"),
+            "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ=="
+        );
+    }
+
+    #[test]
+    fn desteklenmeyen_sema_burada_yakalanmiyor() {
+        // `reqwest::Proxy::all` şemayı istemci kurulurken doğrulamıyor;
+        // `ftp://` sessizce kabul edilip ilk istekte hata veriyor. Bu yüzden
+        // asıl süzgeç `settings::normalize_proxy` (karar #19) — bu test o
+        // sınırın nerede olduğunu kayda geçiriyor.
+        assert!(build_client("test", Duration::from_secs(5), Some("ftp://vekil:9")).is_ok());
+    }
+
+    #[test]
+    fn bos_proxy_dogrudan_baglanti_demek() {
+        assert!(build_client("test", Duration::from_secs(5), Some("   ")).is_ok());
+        assert!(build_client("test", Duration::from_secs(5), None).is_ok());
+    }
+
+    #[test]
+    fn socks5_proxy_kabul_ediliyor() {
+        // `socks` özelliği kapalıyken bu çağrı hata veriyordu (karar #19).
+        assert!(build_client("test", Duration::from_secs(5), Some("socks5://127.0.0.1:1080")).is_ok());
     }
 }

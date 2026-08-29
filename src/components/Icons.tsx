@@ -159,3 +159,12 @@ export function IconLink({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Özet (checksum) — kare kesişen iki çizgi çifti, "#" işareti. */
+export function IconHash({ className }: IconProps) {
+  return (
+    <svg {...ortak} className={className}>
+      <path d="M9 4 7 20M17 4l-2 16M4 9h16M3 15h16" />
+    </svg>
+  );
+}

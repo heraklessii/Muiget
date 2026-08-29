@@ -61,6 +61,13 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
 - [x] Eşzamanlı indirme sayısı sınırı + kuyruk (karar #16)
 - [x] Zaman bazlı hız kuralları (ör. "02:00-08:00 sınırsız")
 - [x] Aynı host'a açılan toplam bağlantı sayısını sınırlama (semafor)
+- [x] **Vekil sunucu (proxy) desteği** (karar #19). `http`/`https`/`socks5`;
+      şemasız adrese `http://` ekleniyor, desteklenmeyen şema boşaltılıyor.
+      `reqwest`'e `socks` özelliği eklendi.
+- [x] **Adrese gömülü kimlik bilgisi** (karar #20).
+      `https://kullanıcı:parola@site/dosya.zip` → `Authorization: Basic`
+      başlığı; adres listede/log'da/metada parolasız duruyor. Uçtan uca test
+      401 dönen bir sunucuya karşı koşuyor.
 - [ ] Segment sayısını indirme sürerken dinamik artırma/azaltma (tam adaptif
       algoritma — ilk sürüm yalnızca boşalan slotu değerlendiriyor)
 - [x] **Host kotası indirmeler arasında paylaştırılıyor** (karar #17).
@@ -102,6 +109,14 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
 - [x] Toplu bağlantı ekleme: kutuya birden çok adres yapıştırılınca hepsi
       kuyruğa alınıyor (tek yenileme turu). Toplu ekleme sunucu yoklamasını
       atlıyor.
+- [x] **Pano izleme** (karar #24): kopyalanan adres indirilebilir bir dosyaya
+      işaret ediyorsa bildirim çıkıyor, düğme yeni indirme kutusunu dolu
+      açıyor. Rust tarafında (pencere tepsideyken de çalışsın diye), dar
+      süzgeçle, varsayılan kapalı. Gerçek pencerede doğrulandı.
+- [x] **Kopya indirme uyarısı** (karar #22): aynı adres listedeyse yeni indirme
+      diyaloğu söylüyor; engellemiyor.
+- [x] **Yeni sürüm bildirimi** (karar #23): açılışta GitHub yayın listesine
+      bakılıyor, ayardan kapatılabiliyor. İmzalı otomatik güncelleyici yok.
 - [x] **Kategori klasörleri** (karar #18): inen dosya türüne göre `Video`,
       `Müzik`, `Belgeler`, `Arşivler`, `Programlar`, `Resimler` alt
       klasörlerine ayrılıyor. Varsayılan kapalı; `.muiget` taraması bu
@@ -141,13 +156,16 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
 - [ ] **Gerçek Chrome ile uçtan uca deneme** — protokol birim testli ama
       Chrome'un host'u gerçekten başlattığı senaryo elle denenmedi
 - [ ] Firefox uyarlaması (native messaging protokolü aynı, manifest farklı)
+- [ ] Edge uyarlaması (registry kaydı zaten yazılıyor, uzantı kimliği farklı)
 - [ ] Chrome Web Store yayını
 
 ## Faz 6 — Medya Özel ve Güven Katmanı
 
 - [ ] HLS/DASH (m3u8) indirme + ffmpeg ile mp4 birleştirme
 - [ ] yt-dlp entegrasyonu (opsiyonel dış bağımlılık olarak)
-- [ ] İndirilen dosya için checksum gösterimi (MD5/SHA256, UI'da görünür)
+- [x] **İndirilen dosya için checksum gösterimi** (karar #21). SHA-256 ve MD5,
+      akış hâlinde; satır sağ tık menüsünden isteniyor, otomatik değil.
+      Yalnızca tamamlanmış indirmede çalışıyor.
 - [ ] Opsiyonel virus tarama tetikleme (Windows Defender API veya VirusTotal API,
       varsayılan kapalı, kullanıcı açıkça etkinleştirmeli)
 
@@ -183,16 +201,23 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
       diye patlayabilir. İlk yeşil koşudan sonra birkaç çalıştırma izlenmeli;
       titrerse eşikler yavaş sunucunun parça aralığına göre büyütülmeli.
 - [x] `cargo clippy --all-targets` temiz (CI'a eklenmesi bekliyor)
-- [ ] **Arayüzün hiç otomatik testi yok.** Rust tarafı 158 testle korunuyor,
+- [ ] **Arayüzün hiç otomatik testi yok.** Rust tarafı 198 testle korunuyor,
       `src/` tarafında sıfır. Artık orada gerçek mantık var: bağlam menüsünün
       duruma göre kısalması, toplu adres ayrıştırma, sürükle-bırakta
-      `text/uri-list` çözümleme. Vitest + Testing Library küçük bir ekleme
-      olurdu; CI'ın `npm run build` adımına `npm test` eklenir. Bu bir öneri,
-      karar İlker'in.
+      `text/uri-list` çözümleme, `urlDosyaAdi` ayrıştırması, kopya uyarısı.
+      Vitest + Testing Library küçük bir ekleme olurdu; CI'ın `npm run build`
+      adımına `npm test` eklenir. Bu bir öneri, karar İlker'in — 9. oturumda da
+      bilerek dokunulmadı.
 - [x] Uygulama ikonu (`tools/ikon-uret.js` ile üretiliyor; harici görüntü
       kütüphanesi yok, `npx tauri icon` platform boyutlarını türetiyor)
 - [x] GitHub Pages tanıtım sayfası (`site/`, `gh-pages` dalına yayınlanıyor)
-- [x] Yayın iş akışı (`v*` etiketi → Windows kurulum paketleri → GitHub Release)
+- [x] Yayın iş akışı (`v*` etiketi → kurulum paketleri → GitHub Release)
+- [x] **Çapraz platform yayın.** `release.yml` artık matris: Windows + Linux
+      (`.deb`/`.AppImage`) + macOS (universal). IDM'in Windows dışına
+      çıkamaması Muiget'in kalıcı farkı. Linux/macOS paketleri **derleniyor
+      ama denenmedi** — yayın notu bunu açıkça yazıyor.
+- [x] **CI'da Linux derlemesi** (`ubuntu-22.04`, `cargo check`). Linux'un ilk
+      kez bir etiket atıldığında denenmesi yayını kırılgan bırakırdı.
 - [x] v0.1.0 ön sürümü yayınlandı (elle; iş akışı depo izin ayarı yüzünden
       düşmüştü, ayar düzeltildi)
 - [x] **Yayın iş akışı uçtan uca sınandı.** `v0.1.1` etiketiyle iş akışı
@@ -207,24 +232,36 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
 
 ## Sıradaki (Şu Anki Öncelik)
 
-1. **Gerçek dünya doğrulaması** — kod değil, sahada deneme işi ve artık en
-   büyük bilinmeyen:
+1. **Gerçek dünya doğrulaması** — kod değil, sahada deneme işi ve **hâlâ en
+   büyük bilinmeyen**:
    - Büyük bir dosyayı (ISO/zip) indirip IDM ile hız karşılaştırması. Otomatik
-     testler doğruluğu gösteriyor, hızı değil.
+     testler doğruluğu gösteriyor, hızı değil. Bu ölçüm yapılana kadar "IDM
+     kadar hızlı" cümlesi tahmin. Bir akşamlık iş.
    - Gerçek Chrome ile köprü denemesi. Köprü, Chrome'un kullandığı argümanlarla
      uçtan uca doğrulandı (8. oturum: `accepted` yanıtı, 2 MB indirme, SHA-256
      birebir) ve host kaydı yazıldı. Kalan tek adım Chrome'da
      **Paketlenmemiş öğe yükle** — otomatikleştirilemiyor.
-   - Sürükle-bırak ve toplu ekleme gerçek pencerede denenmedi. Arayüz tarayıcı
-     panelinde (koyu + açık tema) doğrulandı, ama HTML5 bırakma olayının Tauri
-     webview'inde davranışı yalnızca gerçek pencerede görülür.
-2. **Faz 4 (torrent)** — en büyük yeni yüzey; yukarıdaki bitmeden
-   başlanmamalı.
-3. **Motor derinliği** — IDM ile arayı kapatan asıl işler:
-   - Segment sayısını indirme sürerken dinamik artırma/azaltma (Faz 2'nin açık
-     maddesi). Pay mekanizması (karar #17) artık üst sınırı biliyor; eksik olan
-     hızı ölçüp aşağı inmek.
-   - İndirilen dosya için checksum gösterimi (Faz 6).
-   - Pano izleme: kopyalanan bağlantıyı yakalayıp indirme önerme. IDM'in en çok
-     kullanılan davranışlarından biri; Rust tarafında pano okuyan bir bağımlılık
-     gerektiriyor.
+   - Sürükle-bırak, toplu ekleme, kopya uyarısı ve "SHA-256 hesapla" menüsü
+     gerçek pencerede **tıklanarak** denenmedi. Pano izleme ve sürüm kontrolü
+     9. oturumda gerçek uygulamada doğrulandı.
+
+2. **HLS/DASH (m3u8) video indirme** (Faz 6) — kod tarafında IDM'e yaklaştıran
+   **en büyük tek boşluk**. IDM'i bugün satan özellik video yakalama; motor,
+   arayüz ve uzantı hazırken burası eksik kalıyor. ffmpeg dış bağımlılık
+   olarak mı gelecek, yoksa segment birleştirme kendi kodumuzda mı yapılacak —
+   ilk karar bu.
+
+3. **Tarayıcı kapsamı** — Firefox/Edge uyarlaması (native messaging protokolü
+   aynı, yalnızca manifest farklı) ve Chrome Web Store yayını. Ucuz kazanç:
+   IDM'in üstünlüğü hızda değil yakalamada.
+
+4. **Faz 4 (torrent)** — en büyük yeni yüzey. IDM'de torrent yok, yani rekabet
+   açısından 2. ve 3. maddeden sonra geliyor.
+
+5. **Motor derinliği** — segment sayısını indirme sürerken dinamik
+   artırma/azaltma (Faz 2'nin açık maddesi). Pay mekanizması (karar #17) üst
+   sınırı biliyor; eksik olan hızı ölçüp aşağı inmek.
+
+**Kod dışı, İlker'e kalan:** kod imzalama sertifikası. Paketler imzasız olduğu
+sürece Windows SmartScreen ve macOS Gatekeeper uyarı gösteriyor ve indirenlerin
+çoğu orada duruyor. Para ve kimlik doğrulaması gerektiriyor; kodla çözülmüyor.

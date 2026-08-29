@@ -569,3 +569,183 @@ geliyordu ve tarama tek seviyeydi. Kategori açıkken yarım indirmeler alt
 klasörde olacağı için tarama, **yalnızca bilinen kategori klasörlerine** de
 bakıyor. Serbest özyineleme hâlâ yok: o klasörlere dosyayı bu uygulama koyuyor,
 gerisi kullanıcının alanı.
+
+---
+
+## #19 — Vekil Sunucu: Tek Alan, Şemasız Adrese `http://` Ekle, Geçersizi Boşalt
+
+**Durum:** Kabul edildi
+
+**Bağlam:** Kurumsal ağların çoğu doğrudan çıkışa izin vermiyor. Proxy desteği
+olmayan bir indirme yöneticisi o ağlarda hiç çalışmıyor; IDM'de yıllardır var.
+
+**Karar:** `ManagerConfig.proxy` tek bir dizge. Boş = doğrudan bağlantı.
+`reqwest`'e `socks` özelliği eklendi, böylece `socks5://` de kabul ediliyor.
+Ayar `settings::normalize_proxy`'den geçiyor: şema yoksa `http://` ekleniyor,
+desteklenmeyen şema **boşaltılıyor**.
+
+**Gerekçe:**
+- HTTP ve SOCKS için ayrı alanlar açmak, kullanıcıya bizim iç ayrımımızı
+  ezberletmek olurdu. Adres zaten şemayı taşıyor.
+- Şemasız yazım (`10.0.0.1:8080`) insanların vekil adresini not etme biçimi;
+  bunu hata saymak gereksiz bir tökezleme noktası.
+- Geçersiz şema **boşaltılıyor, hata verilmiyor**: bozuk bir vekille istemci hiç
+  kurulamıyor ve o hâlde uygulama tek bir dosya bile indiremezdi. Sessizce
+  doğrudan bağlanmak, çalışmayan bir yapılandırmadan iyi — durum log'a yazılıyor.
+
+**Sınır:** `reqwest::Proxy::all` şemayı istemci kurulurken doğrulamıyor
+(`ftp://` sessizce kabul edilip ilk istekte patlıyor), bu yüzden asıl süzgeç
+ayar katmanında. `download/http.rs`'teki test bu sınırı kayda geçiriyor.
+
+**Ayar değişiminde geçiş:** yeni vekil yalnızca yeni bağlantılara uygulanıyor;
+akan indirmeler eski istemciyle devam ediyor. Yarım bir indirmeyi ayar değişti
+diye kesmek, kullanıcının beklemediği bir kayıp olurdu.
+
+---
+
+## #20 — Adresteki Kimlik Bilgisi Motorun Kapısında Ayrılıyor
+
+**Durum:** Kabul edildi
+
+**Bağlam:** `https://kullanıcı:parola@site/dosya.zip` biçimi yaygın; korumalı
+dizinler ve bazı NAS/paylaşım sunucuları bunu bekliyor. `reqwest` bu bilgiyi
+kendiliğinden `Authorization` başlığına çevirmiyor, yani adres olduğu gibi
+gönderilse 401 alınıyordu.
+
+**Karar:** `http::split_credentials` adresi ikiye ayırıyor;
+`DownloadManager::start_with` kimliği `Authorization: Basic …` başlığı olarak
+`DownloadOptions.headers`'a ekliyor ve **temizlenmiş** adresi kaydediyor.
+
+**Gerekçe:**
+- Kimlik URL'de kalsaydı listede, log'da ve `.muiget` metasında **parola olarak
+  düz metin** dururdu. Ayırma motorun en dış kapısında yapılıyor; içeride hiçbir
+  katman parolalı adresi görmüyor.
+- Mevcut başlık boru hattı yeniden kullanılıyor (karar #14): başlıklar zaten
+  metaya yazılıyor ve her segment isteğine ekleniyor. Ayrı bir "kimlik" kavramı
+  eklemek aynı işi ikinci kez yapmak olurdu.
+- Uzantıdan gelen `Authorization` başlığı önceliklidir: tarayıcının oturumu,
+  adrese elle yazılmış kimlikten daha güncel.
+- Parolada `@` geçebildiği için son `@` sınır kabul ediliyor; kullanıcı adı ve
+  parola yüzde kodlamasından çözülüyor.
+
+**Sınır:** yalnızca HTTP Basic. Digest ve form tabanlı oturum açma yok; ikisi de
+sunucuyla tur atmayı gerektiriyor ve şu an talep eden bir senaryo yok.
+
+**Doğrulama:** uçtan uca test, kimlik isteyen (yoksa 401 dönen) bir sunucuya
+karşı segmentli indirme yapıyor. Başlık tek bir segmentte unutulsaydı test
+düşerdi. İkinci bir test kimliksiz isteğin gerçekten 401 aldığını gösteriyor —
+yoksa ilk test sunucu her isteği kabul ettiği için de geçebilirdi.
+
+---
+
+## #21 — Checksum İstek Üzerine, Otomatik Değil
+
+**Durum:** Kabul edildi
+
+**Bağlam:** İndirilen dosyanın SHA-256/MD5 özeti, yayımlanmış değerle
+karşılaştırmak için gerekiyor (`docs/project_overview.md` → Güven katmanı).
+
+**Karar:** Özet **her indirmede otomatik hesaplanmıyor**; satır sağ tık
+menüsünden ve `file_checksum` komutundan isteniyor. Yalnızca tamamlanmış
+indirmelerde çalışıyor.
+
+**Gerekçe:**
+- 8 GB'lık bir dosyayı hash'lemek diski baştan sona bir kez daha okumak demek.
+  Kullanıcıların çoğu bu değere hiç bakmıyor; herkese bu bedeli ödetmek yanlış.
+  IDM de otomatik hesaplamıyor.
+- Yarım dosyanın özeti anlamsız ve **zararlı**: kullanıcı onu sitedeki değerle
+  karşılaştırıp "indirme bozuk" sanardı. Bu yüzden komut tamamlanmamış
+  indirmede hata veriyor.
+- MD5 çakışmaya açık, imza doğrulamada kullanılmamalı — yine de duruyor, çünkü
+  indirme sitelerinin çoğu hâlâ yalnızca MD5 yayımlıyor.
+- Hesaplama akış hâlinde ve her blok sonrası `yield_now()` ile: büyük dosyada
+  tek bir görev çekirdeği doldurup arayüzü dondurmasın.
+
+---
+
+## #22 — Kopya İndirme: Uyarı, Engel Değil
+
+**Durum:** Kabul edildi
+
+**Bağlam:** Aynı adres iki kez eklendiğinde ne olmalı? IDM soruyor.
+
+**Karar:** `find_duplicate` listede aynı adresi arıyor; yeni indirme diyaloğu
+bulursa **uyarı** gösteriyor, düğmeyi kilitlemiyor. Pano izleme (karar #24)
+zaten listede olan bir adresi hiç önermiyor.
+
+**Gerekçe:**
+- Engellemek yanlış olurdu: aynı dosyayı bilerek yeniden indirmek meşru bir
+  istek (bozuk indi, dosya silindi, sürüm değişti).
+- Karşılaştırma kimlik ayıklandıktan sonra yapılıyor (karar #20): aynı dosya bir
+  kez parolalı bir kez parolasız yapıştırıldığında ikisi de aynı indirme.
+- İptal edilenler sayılmıyor — kullanıcı onu bilerek durdurdu, yeniden denemek
+  isteyebilir.
+
+---
+
+## #23 — Sürüm Kontrolü Var, İmzalı Otomatik Güncelleyici Yok
+
+**Durum:** Kabul edildi
+
+**Bağlam:** v0.1.2'yi kuran kullanıcı v0.1.3'ten nasıl haberdar olacak? Bugüne
+kadarki cevap "GitHub'a baksın"dı; gerçek kullanıcı için bu, güncellenmeyen bir
+uygulama demek.
+
+**Karar:** Uygulama açılışta GitHub'ın yayın listesine bakıp yeni sürüm varsa
+bildirim gösteriyor; indirmeyi kullanıcının tarayıcısına bırakıyor. Tauri'nin
+`updater` eklentisi **kurulmadı**.
+
+**Gerekçe:**
+- Updater bir imza anahtar çifti ve her yayında imzalanan bir `latest.json`
+  istiyor. Anahtar İlker'in elinde olmadan yarım kurulan bir updater, uygulamayı
+  hiç güncellenemez hâle getirirdi.
+- Bu, uygulamanın kendiliğinden yaptığı **tek** dış istek. Kullanıcı verisi
+  taşımıyor ve ayardan kapatılabiliyor; `project_overview.md`'deki "telemetri
+  yok" sözüyle çelişmemesi için bu sınır ayar metnine de yazıldı.
+
+**Sahada bulunan hata:** ilk uygulama `/releases/latest` uç noktasını
+kullanıyordu. O uç nokta ön sürümleri atlıyor ve Muiget'in **bütün** yayınları
+`prerelease: true` — yani 404 dönüyordu, özellik her seferinde sessizce
+başarısız olurdu. Gerçek API'ye bakılmasaydı görülmezdi; 8. oturumun
+`--native-host` hatasıyla aynı sınıf. Artık `/releases?per_page=10` çekiliyor,
+taslaklar eleniyor ve en yüksek sürüm **liste sırasına güvenmeden** seçiliyor
+(GitHub listeyi tarihe göre sıralıyor, sürüme göre değil).
+
+---
+
+## #24 — Pano İzleme: Rust Tarafında, Dar Süzgeçle, Varsayılan Kapalı
+
+**Durum:** Kabul edildi
+
+**Bağlam:** IDM'in en çok kullanılan davranışlarından biri: bağlantıyı
+kopyalayınca "indireyim mi?" diye sorması. Uzantı kurmadan çalışan tek yol bu.
+
+**Karar:** Pano **Rust tarafında** saniyede bir okunuyor
+(`tauri-plugin-clipboard-manager`), `clipboard::indirilebilir_baglanti`
+süzgecinden geçiyor ve eşleşme arayüze olay olarak gidiyor. Varsayılan kapalı.
+
+**Gerekçe:**
+- **Neden arayüzde değil:** webview'in `navigator.clipboard` okuması pencerenin
+  odakta olmasını gerektiriyor. Oysa bu özelliğin bütün anlamı, kullanıcı
+  *tarayıcıdayken* kopyaladığı adresi yakalamak. Rust tarafı pencere tepside
+  bile çalışıyor.
+- **Neden varsayılan kapalı:** panoyu sürekli okumak, kullanıcının kopyaladığı
+  her şeyi (parola yöneticisinden gelen bir parolayı da) uygulamanın görmesi
+  demek. Böyle bir yeteneğin sessizce açık gelmesi bu projede yanlış olurdu.
+  Ayar metni ne yaptığını açıkça yazıyor.
+- **Neden dar süzgeç:** yalnızca tek satırlık, `http(s)` şemalı ve yolunun
+  sonunda **tanınan bir dosya uzantısı** (karar #18'in tablosu) olan adresler.
+  Her URL'yi yakalamak, bir haber sayfasının adresi kopyalandığında da sormak
+  demekti; ikinci kez rahatsız eden bir özellik kapatılır.
+- **Neden kendiliğinden indirmiyor:** öneri bildirim olarak çıkıyor, düğmeye
+  basılırsa yeni indirme kutusu dolu açılıyor. Kopyalanan her adresi sessizce
+  indirmeye başlamak, kullanıcının istemediği dosyaları diske yazmak olurdu.
+- Açılışta panoda duran içerik yok sayılıyor: uygulama açıldığında panodaki şey
+  kullanıcının o an kopyaladığı bir adres değil.
+- Arayüze pano izni **verilmedi** (`capabilities/default.json` değişmedi):
+  okuma yalnızca Rust tarafında, tek bir yerde.
+
+**Sahada doğrulandı:** uygulama çalışırken pano dışarıdan üç kez değiştirildi.
+`…/test-dosyasi.zip` yakalandı; bir GitHub sayfa adresi ve düz metin bir parola
+**yakalanmadı** — süzgecin gerçekten dar olduğu, "parolam log'a düşer mi"
+sorusunun cevabıyla birlikte görüldü.

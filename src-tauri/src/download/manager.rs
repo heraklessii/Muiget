@@ -140,6 +140,13 @@ pub struct ManagerConfig {
     pub user_agent: String,
     pub connect_timeout_secs: u64,
     pub read_timeout_secs: u64,
+    /// Tüm istekleri üzerinden geçirilecek vekil sunucu (karar #19).
+    ///
+    /// Boş dizge = doğrudan bağlantı. Biçim: `http://host:port`,
+    /// `socks5://host:port`, gerekiyorsa `http://kullanıcı:parola@host:port`.
+    /// `serde(default)` eski `settings.json` dosyaları için.
+    #[serde(default)]
+    pub proxy: String,
 }
 
 impl Default for ManagerConfig {
@@ -158,6 +165,7 @@ impl Default for ManagerConfig {
             user_agent: http::DEFAULT_USER_AGENT.to_string(),
             connect_timeout_secs: 15,
             read_timeout_secs: 30,
+            proxy: String::new(),
         }
     }
 }
@@ -377,6 +385,7 @@ impl DownloadManager {
         let client = http::build_client(
             &config.user_agent,
             Duration::from_secs(config.connect_timeout_secs),
+            Some(config.proxy.as_str()),
         )?;
         let rate = RateLimiter::new(config.global_speed_limit);
         let hosts = HostLimiter::new(config.max_connections_per_host);
@@ -410,9 +419,13 @@ impl DownloadManager {
     /// Ayarları günceller. Hız sınırı ve host kotası anında geçerli olur;
     /// segment sayısı yalnızca yeni indirmelere uygulanır.
     pub fn update_config(&self, config: ManagerConfig) -> Result<()> {
+        // Proxy değişmişse yeni istemci onu kullanıyor. Sürmekte olan
+        // worker'lar eski istemciyle akmaya devam ediyor: yarım bir indirmeyi
+        // vekil değişti diye kesmek, kullanıcının beklemediği bir kayıp olurdu.
         let yeni_client = http::build_client(
             &config.user_agent,
             Duration::from_secs(config.connect_timeout_secs),
+            Some(config.proxy.as_str()),
         )?;
 
         let host_degisti = {
@@ -520,6 +533,21 @@ impl DownloadManager {
         self.inner.entries.read().unwrap().get(id).map(|e| e.snapshot())
     }
 
+    /// Aynı adresin listede bir karşılığı var mı (karar #22).
+    ///
+    /// Karşılaştırma kimlik bilgisi ayıklandıktan sonra yapılıyor: aynı dosya
+    /// bir kez parolalı, bir kez parolasız yapıştırıldığında ikisi de aynı
+    /// indirme. İptal edilenler sayılmıyor — kullanıcı onu bilerek durdurdu,
+    /// yeniden denemek isteyebilir.
+    pub fn find_by_url(&self, url: &str) -> Option<DownloadSnapshot> {
+        let (aranan, _) = http::split_credentials(url);
+        self.ordered_entries()
+            .iter()
+            .map(|e| e.snapshot())
+            .filter(|s| s.status != DownloadStatus::Cancelled)
+            .find(|s| s.url == aranan)
+    }
+
     /// Yeni indirme başlatır ve indirmenin kimliğini döner.
     pub fn start(&self, url: String, directory: PathBuf) -> Result<String> {
         self.start_with(url, directory, DownloadOptions::default())
@@ -534,6 +562,27 @@ impl DownloadManager {
     ) -> Result<String> {
         if !(url.starts_with("http://") || url.starts_with("https://")) {
             return Err(DownloadError::InvalidUrl(url));
+        }
+
+        // Adrese gömülü `kullanıcı:parola@` motorun kapısında ayrılıyor
+        // (karar #20): URL bundan sonra listede, log'da ve resume metasında
+        // parolasız dolaşıyor, kimlik ise `Authorization` başlığı olarak
+        // segment isteklerine ekleniyor.
+        let (url, kimlik) = http::split_credentials(&url);
+        let mut options = options;
+        if let Some((kullanici, parola)) = kimlik {
+            let zaten_var = options
+                .headers
+                .iter()
+                .any(|(ad, _)| ad.eq_ignore_ascii_case("authorization"));
+            // Uzantıdan gelen başlık önceliklidir: tarayıcının oturumu,
+            // adrese elle yazılmış kimlikten daha güncel.
+            if !zaten_var {
+                options.headers.push((
+                    "Authorization".to_string(),
+                    http::basic_auth_value(&kullanici, &parola),
+                ));
+            }
         }
 
         let id = uuid::Uuid::new_v4().to_string();

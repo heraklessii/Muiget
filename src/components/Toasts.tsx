@@ -2,10 +2,23 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type ToastKind = 'success' | 'error' | 'info';
 
+/**
+ * Bildirimin yanındaki tek eylem düğmesi.
+ *
+ * Pano izleme ve güncelleme bildirimi için eklendi: "panoda bağlantı var"
+ * demek, kullanıcıyı menüye göndermeden bir tıklık karşılık sunmadıkça
+ * yarım kalıyor. Eylem seçilince bildirim kendiliğinden kapanıyor.
+ */
+export interface ToastAction {
+  label: string;
+  onSelect: () => void;
+}
+
 export interface Toast {
   id: number;
   kind: ToastKind;
   message: string;
+  action?: ToastAction;
 }
 
 /** Bildirimin kendiliğinden kaybolma süresi. Hatalar daha uzun duruyor. */
@@ -26,14 +39,17 @@ export function useToasts() {
   }, []);
 
   const push = useCallback(
-    (kind: ToastKind, message: string) => {
+    (kind: ToastKind, message: string, action?: ToastAction) => {
       const id = sonraki.current++;
-      setToasts((o) => [...o, { id, kind, message }]);
+      setToasts((o) => [...o, { id, kind, message, action }]);
 
+      // Eylemli bildirim daha uzun duruyor: kullanıcının okuyup karar vermesi
+      // gerekiyor, 3.5 saniye bunun için yeterli değil.
+      const sure = action ? Math.max(SURE[kind], 12_000) : SURE[kind];
       const zaman = window.setTimeout(() => {
         zamanlayicilar.current.delete(zaman);
         dismiss(id);
-      }, SURE[kind]);
+      }, sure);
       zamanlayicilar.current.add(zaman);
     },
     [dismiss],
@@ -64,6 +80,17 @@ export function Toasts({
       {toasts.map((toast) => (
         <div className={`toast ${toast.kind}`} key={toast.id}>
           <span>{toast.message}</span>
+          {toast.action && (
+            <button
+              className="toast__action"
+              onClick={() => {
+                onDismiss(toast.id);
+                toast.action?.onSelect();
+              }}
+            >
+              {toast.action.label}
+            </button>
+          )}
           <button onClick={() => onDismiss(toast.id)} aria-label="Bildirimi kapat">
             ×
           </button>

@@ -85,13 +85,16 @@ muiget/
 │   ├── tests/                  ✅ indirme_uctan_uca.rs (yerel HTTP sunucusu)
 │   └── src/
 │       ├── main.rs             ✅ --native-host kipi ayrımı
-│       ├── lib.rs              ✅ Tauri kurulumu, tepsi, tek örnek
+│       ├── lib.rs              ✅ Tauri kurulumu, tepsi, tek örnek, pano izleyici
 │       ├── commands.rs         ✅ Frontend'e açılan komutlar
-│       ├── settings.rs         ✅ settings.json, normalize()
+│       ├── settings.rs         ✅ settings.json, normalize(), proxy doğrulama
+│       ├── clipboard.rs        ✅ Pano süzgeci (karar #24)
+│       ├── update.rs           ✅ GitHub yayın kontrolü (karar #23)
 │       ├── download/           ✅ Faz 1–2
 │       │   ├── mod.rs             # Hata tipleri
 │       │   ├── category.rs        # Uzantı → kategori klasörü (karar #18)
-│       │   ├── http.rs            # probe(): sunucu yetenekleri, dosya adı
+│       │   ├── checksum.rs        # SHA-256 / MD5 (karar #21)
+│       │   ├── http.rs            # probe(), proxy'li istemci, kimlik ayırma
 │       │   ├── segmenter.rs       # Range parçalarına bölme planı (saf)
 │       │   ├── writer.rs          # Sparse file, seek+write
 │       │   ├── resume.rs          # .muiget meta, tazelik kontrolü
@@ -120,7 +123,7 @@ npm run dev       # sadece frontend (Vite, localhost:1420)
 npm run build     # tsc + vite build → dist/
 npm run tauri dev # tam uygulama (Rust + pencere)
 cargo check       # src-tauri/ içinde, hızlı Rust doğrulaması
-cargo test        # 143 birim + 15 uçtan uca test
+cargo test        # 179 birim + 19 uçtan uca test
 ```
 
 Uçtan uca testler (`src-tauri/tests/indirme_uctan_uca.rs`) elle yazılmış küçük
@@ -159,8 +162,18 @@ Detaylar için `docs/decisions.md`. Kısa özet:
 8. **Kategori klasörleri**: uzantıya göre `Video`, `Müzik`, `Belgeler`…
    Gömülü eşleme, varsayılan kapalı. Tarama (madde 5) bu klasörlere de
    bakıyor, başkalarına değil (karar #18).
-9. **Torrent**: librqbit `Session` API'si üzerinden magnet/`.torrent` desteği.
-   Sequential download modu (streaming izleme) ileride eklenecek.
+9. **Vekil sunucu**: tek alan (`engine.proxy`), boş = doğrudan. `socks5://`
+   destekli. Geçersiz şema boşaltılıyor — bozuk vekille istemci hiç kurulamaz
+   ve uygulama tek dosya bile indiremezdi (karar #19).
+10. **Kimlik bilgisi**: `https://kullanıcı:parola@…` motorun kapısında ayrılıp
+    `Authorization` başlığına taşınıyor; adres listede/log'da/metada parolasız
+    duruyor (karar #20).
+11. **Pano izleme**: Rust tarafında saniyede bir, dar süzgeçle (tek satır +
+    http(s) + tanınan dosya uzantısı), varsayılan kapalı (karar #24).
+12. **Sürüm kontrolü**: GitHub yayın listesi. İmzalı updater yok. Bu,
+    uygulamanın kendiliğinden yaptığı tek dış istek (karar #23).
+13. **Torrent**: librqbit `Session` API'si üzerinden magnet/`.torrent` desteği.
+    Sequential download modu (streaming izleme) ileride eklenecek.
 
 ## Çalışma Tarzı Notları
 
@@ -175,21 +188,25 @@ Detaylar için `docs/decisions.md`. Kısa özet:
 ## Sıradaki Adım
 
 **Faz 0, 1, 2, 3 ve 5 tamamlandı.** Çalışan bir segmentli indirme motoru, tam
-bir arayüz ve Chrome uzantısı var. 158 test geçiyor. Uygulama gerçek
+bir arayüz ve Chrome uzantısı var. 198 test geçiyor. Uygulama gerçek
 penceresinde uçtan uca doğrulandı (8 MB dosya, 8 paralel segment, SHA-256
 birebir aynı). Chrome köprüsü de Chrome'un gerçek çağrısıyla doğrulandı;
 son yayın v0.1.2.
 
-IDM'e yaklaştıran son eklemeler: host kotasının indirmeler arasında adil
-bölüşülmesi (karar #17), kategori klasörleri (karar #18), satır sağ tık
-menüsü, sürükle-bırakla bağlantı ekleme ve toplu ekleme.
+IDM'e yaklaştıran eklemeler: host kotasının indirmeler arasında adil
+bölüşülmesi (karar #17), kategori klasörleri (#18), vekil sunucu (#19),
+adrese gömülü kimlik bilgisi (#20), checksum (#21), kopya uyarısı (#22),
+sürüm bildirimi (#23), pano izleme (#24), satır sağ tık menüsü,
+sürükle-bırakla bağlantı ekleme ve toplu ekleme.
 
-Ayrıca teknik borcun üç maddesi kapandı: indirme listesi oturumlar arası
-korunuyor (açılışta `.muiget` taraması), uzantıdan gelen başlıklar metaya
-yazılıyor, eşzamanlı indirme sayısı sınırlanabiliyor.
+Yayın artık üç platform: Windows + Linux (`.deb`/`.AppImage`) + macOS
+(universal). Linux/macOS paketleri **derleniyor ama sahada denenmedi**; yayın
+notu bunu açıkça yazıyor. CI'da Linux `cargo check` işi var.
 
-Arayüz tarafında Faz 3'ün açık maddeleri de bitti: listede arama/sıralama,
-klavye kısayolları, işletim sistemi bildirimi ve toplu duraklat/sürdür.
+Teknik borcun çoğu kapandı: indirme listesi oturumlar arası korunuyor
+(açılışta `.muiget` taraması), uzantıdan gelen başlıklar metaya yazılıyor,
+eşzamanlı indirme sayısı sınırlanabiliyor. Açık kalan tek borç: **arayüzün
+otomatik testi yok** (Vitest kararı İlker'in).
 
 **Faz 4 (torrent) bilinçli olarak ertelendi:** librqbit ~100 yeni bağımlılık
 getiriyor ve gerçek bir swarm'a karşı denenmeden doğru çalıştığı söylenemez.
@@ -198,16 +215,28 @@ yeterli kanıt değil.
 
 Sıradaki öncelikler (`docs/tasks.md` → "Sıradaki"):
 
-1. **Gerçek dünya doğrulaması** — Faz 1'in IDM hız karşılaştırması ve Faz 5'in
-   gerçek Chrome ile köprü denemesi. İkisi de "yazıldı, sahada denenmedi".
-   Kod işi değil; İlker'in makinesinde denenmesi gerekiyor.
-2. **Faz 4 (torrent)** — yukarıdaki bitmeden başlanmamalı.
-3. **Kalan arayüz işleri** — sürükle-bırak ile bağlantı ekleme, satır sağ tık
-   menüsü. Küçük ve bağımsız.
+1. **Gerçek dünya doğrulaması** — büyük bir dosyayı indirip IDM ile hız
+   karşılaştırması, ve Chrome'da uzantının yüklenmesi. İkisi de kod işi değil;
+   İlker'in makinesinde denenmesi gerekiyor. Ölçüm yapılana kadar "IDM kadar
+   hızlı" cümlesi tahmin.
+2. **HLS/DASH (m3u8) video indirme** (Faz 6) — kod tarafında IDM'e yaklaştıran
+   en büyük tek boşluk. IDM'i bugün satan özellik video yakalama.
+3. **Tarayıcı kapsamı** — Firefox/Edge uyarlaması + Chrome Web Store yayını.
+   Rekabetin kazanıldığı yer hız değil yakalama.
+4. **Faz 4 (torrent)** — IDM'de zaten yok; 2 ve 3'ten sonra.
 
-**İlker'e kalan (kod dışı):** Chrome'da `chrome://extensions` → **Paketlenmemiş
-öğe yükle** → `extension/`. Köprünün geri kalanı (host kaydı, kimlik, uçtan uca
-indirme) 8. oturumda doğrulandı; dosya seçme penceresi otomatikleştirilemiyor.
+**İlker'e kalan (kod dışı):**
+- Chrome'da `chrome://extensions` → **Paketlenmemiş öğe yükle** → `extension/`.
+  Köprünün geri kalanı (host kaydı, kimlik, uçtan uca indirme) 8. oturumda
+  doğrulandı; dosya seçme penceresi otomatikleştirilemiyor.
+- **Kod imzalama sertifikası.** Paketler imzasız olduğu sürece Windows
+  SmartScreen ve macOS Gatekeeper uyarı gösteriyor; indirenlerin çoğu orada
+  duruyor. Kodla çözülmüyor.
+
+**Uyarı — arayüzü denerken:** `cargo run` ile açılan debug binary arayüzü
+`dist/` yerine `devUrl`den (localhost:1420) yüklüyor. Vite çalışmıyorken
+pencere boş kalır ve arayüz kodu hiç çalışmaz. Rust tarafını böyle denemek
+geçerli; arayüz için `npm run tauri dev` şart.
 
 Her yeni oturum şu sırayla okunmalı:
 1. Bu dosya (`CLAUDE.md`) — genel bağlam

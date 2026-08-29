@@ -13,14 +13,48 @@ permissions:
 
 jobs:
   release:
-    name: Windows kurulum paketleri
-    # Şimdilik yalnızca Windows: proje burada geliştiriliyor ve yalnızca burada
-    # denendi. Linux/macOS derlemeleri, o platformlarda gerçekten çalıştığı
-    # doğrulandıktan sonra eklenecek — derlenen ile çalışan aynı şey değil.
-    runs-on: windows-latest
+    name: ${{ matrix.ad }}
+    runs-on: ${{ matrix.os }}
+
+    # Üç platform da aynı etikete yükleniyor; `tauri-action` var olan yayını
+    # bulup paketi ona ekliyor, ikinci bir Release açmıyor.
+    #
+    # Linux ve macOS paketleri **derleniyor ama sahada denenmedi** — proje
+    # Windows'ta geliştiriliyor. Yine de üretiliyorlar: IDM'in Windows dışına
+    # çıkamaması Muiget'in kalıcı farkı ve derlemeyi ertelemek, o platformlarda
+    # ilk hatayı görmeyi de erteliyor. Yayın notu bu sınırı açıkça yazıyor.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            ad: Windows kurulum paketleri
+            args: ''
+          # 22.04: Tauri v2'nin istediği webkit2gtk-4.1 bu sürümde var.
+          - os: ubuntu-22.04
+            ad: Linux paketleri (.deb / .AppImage)
+            args: ''
+          # Tek paketle hem Apple Silicon hem Intel.
+          - os: macos-latest
+            ad: macOS paketi (universal)
+            args: '--target universal-apple-darwin'
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Linux sistem bağımlılıkları
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf \
+            build-essential \
+            file
 
       - uses: actions/setup-node@v4
         with:
@@ -28,10 +62,15 @@ jobs:
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Universal paket iki mimariyi de derliyor.
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # Önbellek anahtarı platforma göre ayrışsın.
+          key: ${{ matrix.os }}
 
       - run: npm ci
 
@@ -41,19 +80,35 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Muiget ${{ github.ref_name }}
+          args: ${{ matrix.args }}
           releaseBody: |
-            Windows x64 kurulum paketleri aşağıda.
+            Kurulum paketleri aşağıda.
 
+            **Windows x64**
             - `.exe` — NSIS kurulumu (önerilen, daha küçük)
             - `.msi` — kurumsal dağıtım için
+
+            **Linux x64**
+            - `.AppImage` — kurulum gerektirmez
+            - `.deb` — Debian/Ubuntu
+
+            **macOS (universal — Apple Silicon + Intel)**
+            - `.dmg`
 
             **Bu bir ön sürüm.** İndirme motoru, arayüz ve Chrome uzantısı
             çalışıyor ve otomatik testlerle doğrulanıyor; ancak uygulama geniş
             çapta sahada denenmedi ve torrent desteği henüz yok. Ne yaptığı ve
             **ne yapmadığı** için [README](https://github.com/heraklessii/Muiget#ne-yapmaz).
 
+            **Linux ve macOS paketleri derleniyor ama geliştirici tarafından
+            denenmedi** — proje Windows'ta geliştiriliyor. O platformlarda
+            karşılaştığınız sorunları issue olarak bildirin.
+
+            Kurulum paketleri imzasız: Windows SmartScreen ve macOS Gatekeeper
+            uyarı gösterecek. Kod imzalama sertifikası henüz yok.
+
             Değişiklikler: [`docs/worklog.md`](https://github.com/heraklessii/Muiget/blob/main/docs/worklog.md)
           releaseDraft: false
-          # Ön sürüm olarak işaretleniyor: 0.1.0 gerçek dünyada henüz
-          # denenmedi ve "Latest" rozetini taşımamalı.
+          # Ön sürüm olarak işaretleniyor: uygulama gerçek dünyada henüz geniş
+          # çapta denenmedi ve "Latest" rozetini taşımamalı.
           prerelease: true

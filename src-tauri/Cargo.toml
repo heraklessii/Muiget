@@ -33,7 +33,15 @@ tokio-util = { version = "0.7.19", features = ["rt"] }
 # decompress ederse okunan byte sayisi ile Content-Length / Range araligi
 # tutmaz ve segment muhasebesi bozulur. Istekler ayrica
 # `Accept-Encoding: identity` gonderiyor (bkz. download/http.rs).
-reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls", "http2", "charset"] }
+# `socks` proxy ayarinin socks5:// semasini kabul edebilmesi icin: HTTP/HTTPS
+# proxy'si reqwest'te varsayilan olarak var, SOCKS5 bu ozellik olmadan
+# "unsupported proxy scheme" hatasi veriyordu (karar #19).
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls", "http2", "charset", "socks"] }
+
+# Indirilen dosyanin SHA-256 / MD5 ozeti (karar #21). Ikisi de saf Rust,
+# ek sistem bagimliligi getirmiyor.
+sha2 = "0.10"
+md-5 = "0.10"
 
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
@@ -41,6 +49,10 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 base64 = "0.23.1"
 tauri-plugin-single-instance = "2.4.3"
 tauri-plugin-notification = "2.3.3"
+
+# Pano izleme (karar #24). Yalnizca Rust tarafindan okunuyor; arayuze pano
+# izni verilmedi, bu yuzden npm karsiligi da eklenmedi.
+tauri-plugin-clipboard-manager = "2"
 
 # Faz 4'te eklenecek: librqbit
 # Bkz. docs/tasks.md

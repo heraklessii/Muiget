@@ -1130,6 +1130,22 @@ svg {
   color: var(--text);
 }
 
+/* Bildirimin eylem düğmesi ("İndir", "Yayına git"). Kapatma çarpısının
+   aksine metin okunur ve vurgulu: tıklanması beklenen şey bu. */
+.toast__action {
+  flex: none;
+  align-self: center;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.toast__action:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 /* ---------------------------------------------------------------------------
  * Yardımcılar
  * ------------------------------------------------------------------------- */

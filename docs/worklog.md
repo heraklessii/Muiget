@@ -7,6 +7,143 @@ Format: Tarih, yapılanlar, kararlar, sıradaki adım.
 
 ---
 
+## 2026-08-30 (9. oturum) — Proxy, Kimlik Doğrulama, Checksum, Pano İzleme, Sürüm Kontrolü, Çapraz Platform Yayın
+
+İlker "daha neler eklenebilir, IDM ile ne zaman yarışır" diye sordu; ardından
+"yapabileceğin her şeyi tek oturumda yap" dedi. Bu oturum o listenin kod
+tarafındaki maddelerini kapatıyor.
+
+Önce durum tespiti: motor ve arayüz büyük ölçüde bitmişti, eksik olan şey kod
+değil **başka birinin kurup kullanabilmesiydi**. Koda bakınca üç boşluk çıktı —
+proxy yok, kimlik doğrulama yok, güncelleme yolu yok — ve hepsi "kurumsal ağda
+hiç çalışmaz / korumalı linki indiremez / güncellenmez" demek oluyordu.
+
+### Vekil sunucu desteği (karar #19)
+
+`ManagerConfig.proxy` tek bir dizge; `reqwest`'e `socks` özelliği eklendi, yani
+`socks5://` de çalışıyor. Şemasız yazılan `10.0.0.1:8080` `http://` sayılıyor,
+desteklenmeyen şema boşaltılıyor.
+
+Boşaltmanın sebebi öğrenilmiş bir davranış: `Client::builder()` bozuk vekille
+hiç kurulamıyor ve o hâlde uygulama **tek bir dosya bile** indiremezdi. Bir ayar
+alanının yanlış doldurulması uygulamayı işlevsiz bırakmamalı.
+
+Yol boyunca öğrenilen: `reqwest::Proxy::all` şemayı istemci kurulurken
+doğrulamıyor — `ftp://` sessizce kabul edilip ilk istekte patlıyor. İlk yazılan
+test bunun tersini varsaydığı için düştü; test, gerçeği kayda geçirecek şekilde
+yeniden yazıldı (yanlış varsayımı doğrulayan bir testi "düzeltmek" yerine).
+
+### Adresteki kimlik bilgisi (karar #20)
+
+`https://ali:gizli@site/dosya.zip` artık çalışıyor. Kimlik motorun **en dış
+kapısında** ayrılıp `Authorization: Basic` başlığına taşınıyor, adres temiz
+kaydediliyor. Yoksa parola listede, log'da ve `.muiget` metasında düz metin
+dururdu.
+
+Mevcut başlık boru hattı (karar #14) yeniden kullanıldı: başlıklar zaten metaya
+yazılıyor ve her segment isteğine ekleniyor. Yeni bir kavram eklemek aynı işi
+ikinci kez yapmak olurdu.
+
+Uçtan uca test için test sunucusuna `KimlikIster` kipi eklendi: kimlik yoksa
+401. Başlık **tek bir segmentte** unutulsa test düşer. İkinci bir test kimliksiz
+isteğin gerçekten 401 aldığını gösteriyor — yoksa ilk test, sunucu her isteği
+kabul ettiği için de geçerdi.
+
+### Checksum (karar #21)
+
+`download/checksum.rs`: SHA-256 ve MD5, akış hâlinde, her blok sonrası
+`yield_now()`. Satır sağ tık menüsünde "SHA-256 hesapla"; sonuç kopyalanabilir
+bildirimle çıkıyor.
+
+Otomatik değil: 8 GB'ı hash'lemek diski baştan sona bir kez daha okumak demek ve
+kullanıcıların çoğu bu değere hiç bakmıyor. Yarım dosyada da çalışmıyor — onun
+özeti kullanıcıya "indirme bozuk" dedirtirdi.
+
+### Kopya indirme tespiti (karar #22)
+
+`find_duplicate` aynı adresi listede arıyor, yeni indirme diyaloğu uyarı
+gösteriyor. **Engel değil**: aynı dosyayı bilerek yeniden indirmek meşru bir
+istek. Karşılaştırma kimlik ayıklandıktan sonra yapılıyor, yani parolalı ve
+parolasız yazım aynı indirme sayılıyor.
+
+### Pano izleme (karar #24) — IDM'in imza davranışı
+
+Kopyalanan adres indirilebilir bir dosyaya işaret ediyorsa uygulama soruyor.
+
+Rust tarafında yazıldı, arayüzde değil: webview'in pano okuması pencerenin
+odakta olmasını gerektiriyor, oysa özelliğin bütün anlamı kullanıcı
+**tarayıcıdayken** kopyaladığı adresi yakalamak.
+
+Varsayılan kapalı ve süzgeç dar (tek satır + `http(s)` + tanınan dosya
+uzantısı). Panoyu sürekli okumak, kullanıcının kopyaladığı her şeyi görmek
+demek; bunun sessizce açık gelmesi bu projede yanlış olurdu.
+
+### Sürüm kontrolü (karar #23) ve orada bulunan hata
+
+Açılışta GitHub'ın yayın listesine bakılıyor, yeni sürüm varsa bildirim çıkıyor.
+İmzalı updater kurulmadı: anahtar çifti olmadan yarım kurulan bir updater,
+uygulamayı hiç güncellenemez hâle getirirdi.
+
+**İlk uygulama `/releases/latest` kullanıyordu ve bu depoda 404 dönüyor** — o uç
+nokta ön sürümleri atlıyor, Muiget'in bütün yayınları ise `prerelease: true`.
+Yani özellik her seferinde sessizce başarısız olurdu. Gerçek API'ye bakılmasa
+görülmezdi; 8. oturumun `--native-host` hatasıyla aynı sınıf: derleniyor,
+testleri geçiyor, çalışmıyor.
+
+Şimdi `/releases?per_page=10` çekiliyor, taslaklar eleniyor ve en yüksek sürüm
+**liste sırasına güvenmeden** seçiliyor. Seçim saf bir fonksiyona
+(`en_yeni_yayin`) alındı ve gerçek yanıt biçiminden türetilmiş bir örnekle
+test edildi — ağa çıkan test yok.
+
+### Çapraz platform yayın
+
+`release.yml` artık matris: Windows + Linux (`.deb`/`.AppImage`) + macOS
+(universal). IDM'in Windows dışına çıkamaması Muiget'in kalıcı farkı ve
+derlemeyi ertelemek, o platformlarda ilk hatayı görmeyi de erteliyordu.
+
+Yayın notu sınırı açıkça yazıyor: Linux ve macOS paketleri **derleniyor ama
+geliştirici tarafından denenmedi**. Ayrıca paketlerin imzasız olduğu ve
+SmartScreen/Gatekeeper uyarısı çıkacağı da yazıldı.
+
+CI'a `ubuntu-22.04` üzerinde `cargo check` işi eklendi: Linux derlemesinin ilk
+kez bir etiket atıldığında denenmesi, yayını kırılgan bırakırdı.
+
+### Gerçek pencerede doğrulama
+
+Uygulama derlenip çalıştırıldı, pano dışarıdan (PowerShell ile) üç kez
+değiştirildi:
+
+| Panoya konan | Sonuç |
+|---|---|
+| `https://ornek.com/test-dosyasi.zip` | yakalandı |
+| `https://github.com/heraklessii/Muiget` | yakalanmadı (dosya değil) |
+| düz metin bir parola | yakalanmadı |
+
+Yani hem özellik çalışıyor hem de "panomdaki parola log'a düşer mi" sorusunun
+cevabı görülmüş oldu.
+
+Bu arada öğrenilen bir tuzak: `cargo run` ile açılan debug binary arayüzü
+`dist/` yerine `devUrl`den (localhost:1420) yüklüyor. Vite çalışmıyorken pencere
+boş kalıyor ve **arayüz kodu hiç çalışmıyor**. Rust tarafını böyle denemek
+geçerli, arayüz tarafı için `npm run tauri dev` şart.
+
+### Sayılar
+
+198 test (179 birim + 19 uçtan uca), `cargo clippy --all-targets -D warnings`
+temiz, `npm run build` temiz. Önceki oturum: 158.
+
+### Sıradaki
+
+Kod tarafında IDM'e yaklaştıran en büyük boşluk artık **HLS/DASH (m3u8) video
+indirme** (Faz 6) — bugün IDM'i satan asıl özellik o. Ondan sonra Firefox/Edge
+uyarlaması ve Chrome Web Store yayını.
+
+İlker'e kalan, kod dışı ve hâlâ en büyük bilinmeyen: büyük bir dosyayı indirip
+IDM ile hız karşılaştırması. Bir akşamlık iş, ölçülene kadar "IDM kadar hızlı"
+cümlesi tahmin.
+
+---
+
 ## 2026-08-30 (8. oturum) — Köprü Düzeltmesi, v0.1.1 Yayını, Kota Adaleti, IDM Özellikleri
 
 İlker "uzantıyı nasıl kurup test ederim" diye sordu. Kuruluma başlamadan önce,
