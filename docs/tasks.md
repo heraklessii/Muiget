@@ -21,11 +21,10 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
 - [x] `.gitignore` eklendi
 - [x] Tauri proje iskeleti kuruldu, `npm run build` + `cargo check` temiz
 - [x] İlk commit atıldı (`main` dalı, 80 dosya)
-- [ ] GitHub reposu oluşturulacak ve remote bağlanacak **(İlker yapacak —
-      `gh` CLI kurulu olmadığı için oturumdan oluşturulamadı)**
-- [ ] Repo URL'si belli olunca `Cargo.toml`, `README.md` ve `NOTICE` içindeki
-      `github.com/ilker/muiget` yer tutucusu düzeltilecek; README'ye CI rozeti
-      eklenecek
+- [x] GitHub reposu oluşturuldu ve remote bağlandı:
+      [heraklessii/Muiget](https://github.com/heraklessii/Muiget) (public)
+- [x] `Cargo.toml`, `README.md` ve `NOTICE` gerçek repo adresine güncellendi;
+      README'ye CI rozeti eklendi
 - [~] `NOTICE` gerçek bağımlılık ağacından yeniden üretilecek — şu an yalnızca
       doğrudan bağımlılıkları listeliyor. **Yayın öncesi zorunlu:**
       `cargo about generate` + `npx license-checker --production`

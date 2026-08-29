@@ -3,11 +3,12 @@
 **Açık kaynak indirme yöneticisi.** IDM'in yaptığını yapan, ama kimsenin lisans
 anahtarı satın alması gerekmeyen, kodunu herkesin okuyup değiştirebildiği bir araç.
 
+[![CI](https://github.com/heraklessii/Muiget/actions/workflows/ci.yml/badge.svg)](https://github.com/heraklessii/Muiget/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/durum-geli%C5%9Ftirme%20a%C5%9Famas%C4%B1nda-orange.svg)](docs/tasks.md)
 
 > ⚠️ **Bu proje erken geliştirme aşamasında.** İndirme motoru, arayüz ve Chrome
-> uzantısı çalışıyor (123 test geçiyor) ama henüz yayınlanmış bir sürüm yok ve
+> uzantısı çalışıyor (140 test geçiyor) ama henüz yayınlanmış bir sürüm yok ve
 > gerçek dünyada geniş çapta denenmedi. Torrent desteği henüz eklenmedi.
 > İlerlemeyi [`docs/tasks.md`](docs/tasks.md) üzerinden takip edebilirsiniz.
 
@@ -74,8 +75,8 @@ Platforma özel Tauri bağımlılıkları (Windows'ta WebView2, Linux'ta
 ### Derleme
 
 ```bash
-git clone https://github.com/ilker/muiget.git
-cd muiget
+git clone https://github.com/heraklessii/Muiget.git
+cd Muiget
 npm install
 npm run tauri dev    # geliştirme modu
 npm run tauri build  # üretim binary'si
