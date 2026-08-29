@@ -420,6 +420,15 @@ impl DownloadManager {
             mevcut.max_connections_per_host != config.max_connections_per_host
         };
         if host_degisti {
+            // Limiter yerine yenisi konuyor; sürmekte olan worker'lar eski
+            // semaforun iznini, eski süpervizörler de eski limiterdeki kaydını
+            // tutmaya devam ediyor. Yani kota geçiş anında kısa süre aşılabilir
+            // ve pay hesabı sürmekte olan indirmeleri saymaz.
+            //
+            // Bilinçli: alternatif, çalışan indirmeleri kesip yeniden
+            // planlamaktı — kullanıcı bir ayarı değiştirdi diye yarım TCP
+            // bağlantılarını çöpe atmak orantısız. Geçiş, indirmeler bittikçe
+            // kendiliğinden tamamlanıyor.
             *self.inner.hosts.write().unwrap() = HostLimiter::new(config.max_connections_per_host);
         }
 

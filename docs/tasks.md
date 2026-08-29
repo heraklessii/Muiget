@@ -183,6 +183,12 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
       diye patlayabilir. İlk yeşil koşudan sonra birkaç çalıştırma izlenmeli;
       titrerse eşikler yavaş sunucunun parça aralığına göre büyütülmeli.
 - [x] `cargo clippy --all-targets` temiz (CI'a eklenmesi bekliyor)
+- [ ] **Arayüzün hiç otomatik testi yok.** Rust tarafı 158 testle korunuyor,
+      `src/` tarafında sıfır. Artık orada gerçek mantık var: bağlam menüsünün
+      duruma göre kısalması, toplu adres ayrıştırma, sürükle-bırakta
+      `text/uri-list` çözümleme. Vitest + Testing Library küçük bir ekleme
+      olurdu; CI'ın `npm run build` adımına `npm test` eklenir. Bu bir öneri,
+      karar İlker'in.
 - [x] Uygulama ikonu (`tools/ikon-uret.js` ile üretiliyor; harici görüntü
       kütüphanesi yok, `npx tauri icon` platform boyutlarını türetiyor)
 - [x] GitHub Pages tanıtım sayfası (`site/`, `gh-pages` dalına yayınlanıyor)
