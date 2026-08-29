@@ -1,0 +1,59 @@
+name: Release
+
+# `v` ile başlayan bir etiket itilince kurulum paketlerini derleyip GitHub
+# Release'ine yükler. Etiketi elle atmak bilinçli: her commit'te sürüm
+# yayınlamak, henüz sahada denenmemiş bir uygulama için yanlış sinyal olurdu.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Windows kurulum paketleri
+    # Şimdilik yalnızca Windows: proje burada geliştiriliyor ve yalnızca burada
+    # denendi. Linux/macOS derlemeleri, o platformlarda gerçekten çalıştığı
+    # doğrulandıktan sonra eklenecek — derlenen ile çalışan aynı şey değil.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Muiget ${{ github.ref_name }}
+          releaseBody: |
+            Windows x64 kurulum paketleri aşağıda.
+
+            - `.exe` — NSIS kurulumu (önerilen, daha küçük)
+            - `.msi` — kurumsal dağıtım için
+
+            **Bu bir ön sürüm.** İndirme motoru, arayüz ve Chrome uzantısı
+            çalışıyor ve otomatik testlerle doğrulanıyor; ancak uygulama geniş
+            çapta sahada denenmedi ve torrent desteği henüz yok. Ne yaptığı ve
+            **ne yapmadığı** için [README](https://github.com/heraklessii/Muiget#ne-yapmaz).
+
+            Değişiklikler: [`docs/worklog.md`](https://github.com/heraklessii/Muiget/blob/main/docs/worklog.md)
+          releaseDraft: false
+          # Ön sürüm olarak işaretleniyor: 0.1.0 gerçek dünyada henüz
+          # denenmedi ve "Latest" rozetini taşımamalı.
+          prerelease: true

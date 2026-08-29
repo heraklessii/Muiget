@@ -51,6 +51,16 @@ Thumbs.db
 desktop.ini
 $RECYCLE.BIN/
 
+# --- GitHub Pages'e derleme anında kopyalanan varlıklar ---
+# Ekran görüntüsü, ikon ve fontlar depoda tek yerde duruyor; Pages iş akışı
+# (.github/workflows/pages.yml) onları site/ altına kopyalıyor. Commit'lenmiş
+# ikinci bir kopya kaçınılmaz olarak ayrışırdı.
+site/ekran-goruntusu.png
+site/ikon.png
+site/outfit-latin.woff2
+site/outfit-latin-ext.woff2
+site/.nojekyll
+
 # --- Test / kapsam çıktıları ---
 coverage/
 *.profraw

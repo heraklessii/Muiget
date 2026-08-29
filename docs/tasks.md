@@ -63,6 +63,13 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
 - [x] Aynı host'a açılan toplam bağlantı sayısını sınırlama (semafor)
 - [ ] Segment sayısını indirme sürerken dinamik artırma/azaltma (tam adaptif
       algoritma — ilk sürüm yalnızca boşalan slotu değerlendiriyor)
+- [ ] **Host kotası indirmeler arasında paylaştırılmıyor.** Aynı siteden üç
+      indirme başlatılınca ilki 8 bağlantının hepsini alıyor, diğer ikisi
+      sıfır byte'ta bekliyor ve ancak ilki bitince başlıyorlar. Sonuç doğru
+      (kota aşılmıyor) ve indirmeler kaybolmuyor, ama sıra tamamen rastlantısal.
+      Arayüz şimdilik dürüst davranıp "Bağlantı bekleniyor" yazıyor; asıl çözüm
+      kotayı aktif indirmelere bölüştürmek. Gerçek uygulamada üç eşzamanlı
+      indirmeyle görüldü.
 
 ## Faz 3 — Tauri UI (React/Vite) ✅
 

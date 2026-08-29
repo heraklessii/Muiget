@@ -7,6 +7,89 @@ Format: Tarih, yapılanlar, kararlar, sıradaki adım.
 
 ---
 
+## 2026-08-29 (7. oturum) — Çökme Düzeltildi, Uygulama İlk Kez Gerçekten Çalıştırıldı
+
+İlker "yeni indirme yapmaya kalkınca uygulama çöküyor" dedi. Sebep bulundu,
+düzeltildi ve uygulama ilk kez gerçek penceresinde uçtan uca çalıştırıldı.
+
+### Çökmenin sebebi
+
+```
+panicked at src/download/manager.rs:778:
+there is no reactor running, must be called from the context of a Tokio 1.x runtime
+```
+
+`tokio::spawn` çağıran thread'in **ortam** çalışma zamanı bağlamına bakıyor ve
+bağlam yoksa panikliyor. Tauri'nin senkron komutları (`start_download`,
+`resume_download`, `resume_all_downloads`), tek-örnek eklentisinin geri
+çağırması ve kurulum kancası — hiçbiri o bağlamda değil. Yani "İndir"e basmak
+motoru düşürüyordu.
+
+Bu hata en baştan beri koddaydı; uygulama bugüne kadar hiç gerçek penceresinde
+çalıştırılmadığı için görünmemişti. Otomatik testler yakalayamazdı: hepsi
+`#[tokio::test]` içinde, yani her zaman bağlam **vardı**.
+
+**Düzeltme:** yönetici artık ortam bağlamına güvenmiyor, kurulumda bir
+`tokio::runtime::Handle` alıp saklıyor ve tüm görevleri onun üzerinden
+başlatıyor. `DownloadManager::new` bağlam yoksa panik yerine anlaşılır bir hata
+dönüyor. `lib.rs` motoru `block_on` içinde kuruyor.
+
+İki regresyon testi eklendi; ilki bilerek `block_on` **dışından** çağırıyor ve
+düzeltmeden önce panikliyordu.
+
+### İkinci hata: uzantının verdiği dosya adı yok sayılıyordu
+
+`DownloadOptions::file_name` "sunucudan gelen adı ezmek için" diye
+belgelenmişti ama `supervise` yoklama sonucundaki adı kullanıyordu. Yani
+tarayıcıdan gelen her indirme, tarayıcının çözdüğü ad yerine sunucunun ham
+adıyla kaydediliyordu. Düzeltildi, uçtan uca testi var.
+
+### Uygulama ilk kez gerçekten çalıştırıldı
+
+Yayın binary'si `--add` köprüsüyle (çökmenin yaşandığı yol) yerel bir test
+sunucusuna karşı çalıştırıldı:
+
+- 8 MB dosya, 8 segmente bölündü, hepsi paralel indi (sunucu logunda sekiz
+  ayrı `206 Partial Content`)
+- İnen dosyanın SHA-256'sı kaynakla **birebir aynı**
+- `.mgpart` ve `.muiget` ara dosyaları temizlendi
+- Arayüz gerçek Tauri webview'inde ilk kez görüldü — tarayıcı önizlemesinde
+  görünenle aynı çalışıyor
+
+### Gerçek çalıştırmanın ortaya çıkardığı üçüncü sorun
+
+Aynı siteden üç indirme başlatılınca ilki host kotasının (8 bağlantı) tamamını
+alıyor, diğer ikisi sıfır byte'ta bekliyor. Sonuç doğru — kota aşılmıyor ve
+indirmeler sırayla tamamlanıyor — ama arayüz "İniyor · %0 · —" yazdığı için
+takılmış görünüyordu. Arayüz artık bu durumda **"Bağlantı bekleniyor"** diyor
+ve anlamsız hız/süre alanlarını göstermiyor. Kotayı indirmeler arasında
+paylaştırmak `docs/tasks.md`'ye yazıldı.
+
+### Uygulama ikonu
+
+Varsayılan Tauri ikonu gitti. Yeni ikon `tools/ikon-uret.js` ile üretiliyor:
+harici görüntü kütüphanesi yok, Node'un `zlib`'iyle PNG elle yazılıyor, kenar
+yumuşatma 4 kat supersampling. Biçim arayüzdeki `IconDownload` ile aynı, renk
+Mui ailesinin teal'i. `npx tauri icon` platform boyutlarını üretti; mobil
+klasörleri silindi (proje masaüstü hedefliyor).
+
+### Yayın altyapısı
+
+- `.github/workflows/release.yml` — `v*` etiketi itilince `tauri-action` ile
+  Windows kurulum paketlerini derleyip GitHub Release'ine yüklüyor. Ön sürüm
+  olarak işaretleniyor: 0.1.0 sahada geniş çapta denenmedi.
+- `.github/workflows/pages.yml` — `site/` klasörünü GitHub Pages'e yayınlıyor.
+  `configure-pages` `enablement: true` ile Pages'i kendisi açıyor, elle ayar
+  gerekmiyor. Ekran görüntüsü, ikon ve fontlar depodaki tek kopyadan
+  kopyalanıyor.
+- `site/index.html` — tanıtım sayfası. "Ne yapmaz" bölümü sayfanın ortasında,
+  kendi zemininde duruyor: projenin sınırı gizlenecek bir şey değil.
+
+**Doğrulama:** 130 birim + 13 uçtan uca test, clippy temiz, yayın build'i
+üretiliyor, uygulama gerçek pencerede indirme yapıyor.
+
+---
+
 ## 2026-08-29 (6. oturum) — İlk Commit, CI ve İlk Yayın Build'i
 
 **İlk commit atıldı.** Dal `master` → `main` olarak yeniden adlandırıldı

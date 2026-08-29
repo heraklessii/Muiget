@@ -690,3 +690,46 @@ async fn tumunu_duraklat_ve_tumunu_surdur() {
     }
 }
 
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn uzantidan_gelen_dosya_adi_sunucununkini_eziyor() {
+    // Tarayıcı dosya adını yönlendirme zinciri ve kendi kurallarıyla çözüyor;
+    // sunucunun ham adından daha doğru oluyor. `DownloadOptions::file_name`
+    // bunun için var ama yoklama sonucu üzerine yazdığı için tutulmuyordu:
+    // uzantıdan gelen her indirme sunucunun verdiği adla kaydediliyordu.
+    const BOYUT: usize = 64 * 1024;
+    let icerik = beklenen_icerik(BOYUT);
+    let sunucu = TestSunucusu::baslat(icerik.clone(), SunucuKipi::RangeDestekli).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let manager = DownloadManager::new(test_config(2)).unwrap();
+
+    let secenekler = muiget_lib::download::DownloadOptions {
+        headers: Vec::new(),
+        file_name: Some("tarayicinin-cozdugu-ad.bin".into()),
+    };
+
+    // Sunucu bu adresi "sunucu-adi.bin" diye adlandırıyor (URL'den türetiliyor).
+    let id = manager
+        .start_with(sunucu.url("/sunucu-adi.bin"), dir.path().to_path_buf(), secenekler)
+        .unwrap();
+
+    let durum = tamamlanmayi_bekle(&manager, &id).await;
+    let snapshot = manager.get(&id).unwrap();
+    assert_eq!(durum, DownloadStatus::Completed, "hata: {:?}", snapshot.error);
+
+    assert_eq!(
+        snapshot.file_name, "tarayicinin-cozdugu-ad.bin",
+        "arayüzde uzantının verdiği ad görünmeli"
+    );
+    let hedef = PathBuf::from(&snapshot.target_path);
+    assert_eq!(
+        hedef.file_name().unwrap(),
+        "tarayicinin-cozdugu-ad.bin",
+        "dosya diske uzantının verdiği adla yazılmalı"
+    );
+    assert!(hedef.exists(), "dosya beklenen yolda yok");
+
+    let yazilan = tokio::fs::read(&hedef).await.unwrap();
+    assert!(yazilan == icerik);
+}

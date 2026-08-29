@@ -72,24 +72,28 @@ pub fn run() {
                 .download_dir()
                 .unwrap_or_else(|_| config_dir.clone());
 
-            // Ayarlar diskten okunuyor. `block_on` yerine senkron blok:
-            // kurulum sırasında henüz bir runtime içinde değiliz.
-            let ayarlar = tauri::async_runtime::block_on(AppSettings::load(
-                &config_dir,
-                download_dir,
-            ));
-
-            let manager = DownloadManager::new(ayarlar.engine.clone())
-                .map_err(|e| format!("indirme motoru kurulamadı: {e}"))?;
-            manager.apply_bandwidth_schedule();
-
-            // Önceki oturumdan kalan yarım indirmeleri listeye geri yükle.
+            // Kurulum kancası bir Tokio çalışma zamanı bağlamında **değil**;
+            // ayar okuma da motor kurulumu da bu yüzden `block_on` içinde.
             //
-            // Pencere açılmadan **önce** ve senkron yapılıyor: arayüz açılışta
-            // `list_downloads` çağırıyor ve tarama arka planda kalsaydı liste
-            // bir an boş görünüp sonra dolardı. Tarama tek bir klasörün dizin
-            // girdilerini okumaktan ibaret, göze çarpan bir gecikme değil.
-            tauri::async_runtime::block_on(yarim_indirmeleri_yukle(&manager, &ayarlar));
+            // Motorun handle'ı burada alınıyor (bkz. `DownloadManager::new`).
+            // Dışarıda kurulsaydı handle alınamaz, ilk indirmede "there is no
+            // reactor running" paniğiyle uygulama çökerdi.
+            let (ayarlar, manager) = tauri::async_runtime::block_on(async {
+                let ayarlar = AppSettings::load(&config_dir, download_dir).await;
+
+                let manager = DownloadManager::new(ayarlar.engine.clone())
+                    .map_err(|e| format!("indirme motoru kurulamadı: {e}"))?;
+                manager.apply_bandwidth_schedule();
+
+                // Önceki oturumdan kalan yarım indirmeleri listeye geri yükle.
+                // Pencere açılmadan **önce**: arayüz açılışta `list_downloads`
+                // çağırıyor ve tarama arka planda kalsaydı liste bir an boş
+                // görünüp sonra dolardı. Tek bir klasörün dizin girdilerini
+                // okumak, göze çarpan bir gecikme değil.
+                yarim_indirmeleri_yukle(&manager, &ayarlar).await;
+
+                Ok::<_, String>((ayarlar, manager))
+            })?;
 
             // Motorun ilerleme yayınını Tauri olayına köprüle. Motor Tauri'yi
             // tanımıyor; bağlantı yalnızca burada kuruluyor.

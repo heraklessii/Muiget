@@ -129,8 +129,9 @@ mod tests {
         assert_eq!(parse_add_argument(&args), None);
     }
 
-    #[test]
-    fn desteklenmeyen_sema_motora_ulasmiyor() {
+    // Yönetici kurulumu çalışma zamanı handle'ı istiyor (bkz. `Inner::runtime`).
+    #[tokio::test]
+    async fn desteklenmeyen_sema_motora_ulasmiyor() {
         let manager =
             DownloadManager::new(crate::download::manager::ManagerConfig::default()).unwrap();
         let istek = DownloadRequest { url: "file:///etc/passwd".into(), ..Default::default() };

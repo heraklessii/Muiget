@@ -65,6 +65,19 @@ export const DownloadRow = memo(function DownloadRow({
   const aktif = isActive(download.status);
   const uzanti = fileExtension(download.fileName);
 
+  /**
+   * "İniyor" ama henüz tek byte inmemiş: bağlantı bekleniyor demek.
+   *
+   * İki durumda oluyor ve ikisinde de doğru: (1) istek yeni gitti, sunucu
+   * henüz yanıt vermedi; (2) aynı siteye açık bağlantı sayısı kotayı doldurmuş
+   * ve bu indirmenin parçaları sıra bekliyor. İkisinde de "İniyor · %0 · —"
+   * yazmak kullanıcıya takılmış izlenimi veriyordu.
+   */
+  const baglantiBekliyor =
+    download.status === 'running' && download.downloaded === 0 && download.speed === 0;
+
+  const durumMetni = baglantiBekliyor ? 'Bağlantı bekleniyor' : DURUM_METNI[download.status];
+
   return (
     <article className={`download is-${download.status}`}>
       <div className="download__head">
@@ -77,8 +90,10 @@ export const DownloadRow = memo(function DownloadRow({
             {download.fileName}
           </div>
           <div className="download__meta">
-            <span className={`badge ${DURUM_SINIFI[download.status]}`}>
-              {DURUM_METNI[download.status]}
+            <span
+              className={`badge ${baglantiBekliyor ? 'queued' : DURUM_SINIFI[download.status]}`}
+            >
+              {durumMetni}
             </span>
             {download.totalSize > 0 && (
               <span className="dot">
@@ -182,7 +197,9 @@ export const DownloadRow = memo(function DownloadRow({
 
       <div className="download__foot">
         <span>{formatPercent(oran)}</span>
-        {download.status === 'running' && (
+        {/* Hız ve kalan süre yalnızca gerçekten akarken: "— / kalan —" yazmak
+            bilgi vermiyor, yalnızca satırı gürültüyle dolduruyordu. */}
+        {download.status === 'running' && !baglantiBekliyor && (
           <>
             <span>{formatSpeed(download.speed)}</span>
             <span>kalan {formatDuration(download.etaSeconds)}</span>

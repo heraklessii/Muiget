@@ -328,6 +328,15 @@ struct Inner {
     hosts: RwLock<Arc<HostLimiter>>,
     config: RwLock<ManagerConfig>,
     events: broadcast::Sender<DownloadSnapshot>,
+    /// Görevlerin başlatılacağı çalışma zamanı.
+    ///
+    /// `tokio::spawn` **kullanılamaz**: o, çağıran thread'in ortam bağlamına
+    /// bakıyor ve bağlam yoksa panikliyor. Yönetici ise Tauri'nin senkron
+    /// komut işleyicilerinden, tek-örnek eklentisinin geri çağırmasından ve
+    /// kurulum kancasından da çağrılıyor — bunların hiçbiri çalışma zamanı
+    /// bağlamında değil. Handle kurulumda bir kez alınıp saklanıyor; böylece
+    /// motor kimin hangi thread'den çağırdığından bağımsız çalışıyor.
+    runtime: tokio::runtime::Handle,
     /// Kuyruğu boşaltan kod aynı anda tek yerden çalışsın diye.
     ///
     /// Olmasaydı iki indirme aynı anda bitince iki `pump` aynı boş slotu görüp
@@ -342,7 +351,19 @@ pub struct DownloadManager {
 }
 
 impl DownloadManager {
+    /// Yöneticiyi kurar.
+    ///
+    /// **Bir Tokio çalışma zamanı içinden çağrılmalı** — handle burada
+    /// alınıyor (bkz. [`Inner::runtime`]). Bağlam yoksa panik yerine hata
+    /// dönüyor: kurulumda anlaşılır bir mesaj, indirmeye basıldığında
+    /// açıklamasız bir çökmeden iyi.
     pub fn new(config: ManagerConfig) -> Result<Self> {
+        let runtime = tokio::runtime::Handle::try_current().map_err(|_| {
+            DownloadError::Other(
+                "indirme motoru bir Tokio çalışma zamanı içinden kurulmalı".into(),
+            )
+        })?;
+
         let client = http::build_client(
             &config.user_agent,
             Duration::from_secs(config.connect_timeout_secs),
@@ -361,6 +382,7 @@ impl DownloadManager {
                 config: RwLock::new(config),
                 events,
                 pump: Mutex::new(()),
+                runtime,
             }),
         })
     }
@@ -775,7 +797,7 @@ impl DownloadManager {
     /// eşzamanlılık sınırını atlamamak için başka yerden çağrılmamalı.
     fn spawn_supervisor(&self, entry: Arc<Entry>, directory: PathBuf, fresh: bool) {
         let manager = self.clone();
-        tokio::spawn(async move {
+        self.inner.runtime.spawn(async move {
             if let Err(e) = manager.supervise(entry.clone(), directory, fresh).await {
                 let mut state = entry.state.lock().unwrap();
                 // İptal/duraklama zaten doğru durumu yazdı; üzerine hata yazma.
@@ -826,11 +848,25 @@ impl DownloadManager {
             sonuc = http::probe_with(&client, &entry.url, &entry.options.headers) => sonuc?,
         };
 
-        // --- 2. Hedef yolu belirle ---
+        // --- 2. Dosya adına ve hedef yola karar ver ---
+        //
+        // Uzantıdan bir ad geldiyse **o kazanıyor**: tarayıcı adı
+        // `Content-Disposition`, yönlendirme zinciri ve kendi indirme
+        // kurallarıyla çözüyor, sunucunun ham adından daha doğru oluyor.
+        // (Bu, `DownloadOptions::file_name`in zaten belgelenmiş sözüydü ama
+        // yoklama sonucu üzerine yazdığı için tutulmuyordu.)
+        let dosya_adi = entry
+            .options
+            .file_name
+            .as_deref()
+            .map(http::sanitize_file_name)
+            .filter(|ad| !ad.is_empty())
+            .unwrap_or_else(|| caps.file_name.clone());
+
         let target = {
             let mevcut = entry.state.lock().unwrap().target.clone();
             if fresh {
-                benzersiz_yol(&directory, &caps.file_name, &entry.url).await
+                benzersiz_yol(&directory, &dosya_adi, &entry.url).await
             } else {
                 mevcut
             }
@@ -858,7 +894,7 @@ impl DownloadManager {
 
         {
             let mut state = entry.state.lock().unwrap();
-            state.file_name = caps.file_name.clone();
+            state.file_name = dosya_adi.clone();
             state.target = target.clone();
             state.resolved = true;
             state.total_size = caps.content_length.unwrap_or(0);
@@ -1026,7 +1062,7 @@ impl DownloadManager {
         let rate = self.inner.rate.clone();
         let hosts = self.inner.hosts.read().unwrap().clone();
 
-        tokio::spawn(async move {
+        self.inner.runtime.spawn(async move {
             let _ = worker::run_segment(client, ctx, part, config, tx, cancel, rate, hosts).await;
         });
     }
@@ -1462,23 +1498,67 @@ mod tests {
         assert_eq!(adlar, vec!["ilk.bin", "son.bin"]);
     }
 
+    /// **Regresyon (çökme):** yönetici, kendisini kuran çalışma zamanının
+    /// bağlamı DIŞINDAN çağrıldığında da çalışmak zorunda.
+    ///
+    /// Tauri'nin senkron komutları (`start_download`, `resume_download`,
+    /// `resume_all_downloads`), tek-örnek eklentisinin geri çağırması ve
+    /// kurulum kancası — hiçbiri Tokio bağlamında değil. Motor `tokio::spawn`
+    /// kullanırken bunların hepsi "there is no reactor running" paniğiyle
+    /// uygulamayı düşürüyordu: kullanıcı "İndir"e basar basmaz çökme.
     #[test]
-    fn gecersiz_url_reddediliyor() {
+    fn calisma_zamani_baglami_disindan_baslatilabiliyor() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let manager = rt.block_on(async { DownloadManager::new(test_config()).unwrap() });
+
+        // Kritik nokta: bu çağrı `block_on` DIŞINDA, yani bağlamsız.
+        let dir = tempfile::tempdir().unwrap();
+        let sonuc = manager.start("http://127.0.0.1:1/a.bin".into(), dir.path().to_path_buf());
+        assert!(sonuc.is_ok(), "bağlam dışından başlatma hata verdi: {sonuc:?}");
+
+        // Sürdürme yolu da aynı paniği veriyordu.
+        let id = sonuc.unwrap();
+        manager.pause(&id).unwrap();
+        assert!(manager.resume(&id).is_ok(), "bağlam dışından sürdürme hata verdi");
+    }
+
+    #[test]
+    fn calisma_zamani_yoksa_kurulum_panik_yerine_hata_veriyor() {
+        // Panik yerine hata: kurulumda anlaşılır bir mesaj, indirmeye
+        // basıldığında açıklamasız bir çökmeden iyi.
+        // `DownloadManager` `Debug` türetmiyor (içinde `Client` var), o yüzden
+        // `unwrap_err` yerine elle eşleştiriliyor.
+        match DownloadManager::new(test_config()) {
+            Err(hata) => assert!(
+                hata.to_string().contains("çalışma zamanı"),
+                "anlaşılmayan hata: {hata}"
+            ),
+            Ok(_) => panic!("çalışma zamanı yokken kurulum başarılı olmamalıydı"),
+        }
+    }
+
+    /// Testlerde ağa çıkılmasın diye kısa zaman aşımları.
+    fn test_config() -> ManagerConfig {
+        ManagerConfig { connect_timeout_secs: 3, ..ManagerConfig::default() }
+    }
+
+    #[tokio::test]
+    async fn gecersiz_url_reddediliyor() {
         let manager = DownloadManager::new(ManagerConfig::default()).unwrap();
         let hata = manager.start("ftp://ornek.com/a.zip".into(), PathBuf::from(".")).unwrap_err();
         assert!(matches!(hata, DownloadError::InvalidUrl(_)));
     }
 
-    #[test]
-    fn olmayan_indirme_bulunamadi_veriyor() {
+    #[tokio::test]
+    async fn olmayan_indirme_bulunamadi_veriyor() {
         let manager = DownloadManager::new(ManagerConfig::default()).unwrap();
         assert!(matches!(manager.pause("yok"), Err(DownloadError::NotFound(_))));
         assert!(manager.get("yok").is_none());
         assert!(manager.list().is_empty());
     }
 
-    #[test]
-    fn ayar_guncellemesi_hiz_sinirini_uyguluyor() {
+    #[tokio::test]
+    async fn ayar_guncellemesi_hiz_sinirini_uyguluyor() {
         let manager = DownloadManager::new(ManagerConfig::default()).unwrap();
         assert_eq!(manager.effective_speed_limit(), 0);
 
@@ -1489,8 +1569,8 @@ mod tests {
         assert_eq!(manager.effective_speed_limit(), 2_000_000);
     }
 
-    #[test]
-    fn zaman_kurali_genel_siniri_eziyor() {
+    #[tokio::test]
+    async fn zaman_kurali_genel_siniri_eziyor() {
         let manager = DownloadManager::new(ManagerConfig::default()).unwrap();
 
         let mut config = manager.config();
@@ -1537,3 +1617,4 @@ mod tests {
         assert_eq!(snapshot.progress(), 1.0, "yüzde 100'ü aşmamalı");
     }
 }
+

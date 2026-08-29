@@ -1,0 +1,59 @@
+name: Pages
+
+# Tanıtım sayfasını GitHub Pages'e yayınlar.
+on:
+  push:
+    branches: [main]
+    # Sayfayı ilgilendirmeyen commit'lerde çalışmasın.
+    paths:
+      - 'site/**'
+      - 'docs/ekran-goruntusu.png'
+      - 'src-tauri/icons/**'
+      - 'src/assets/fonts/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Yayın sırası bozulmasın: aynı anda tek dağıtım.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.dagitim.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # `enablement: true`, depo ayarlarında Pages kapalıysa açıyor; böylece
+      # ilk yayın için elle bir ayar değişikliği gerekmiyor.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      # Ekran görüntüsü, ikon ve font depoda tek yerde duruyor (README ve
+      # uygulama da onları kullanıyor). Siteye kopyalanıyorlar ki ikinci bir
+      # kopya tutup ayrışma riski doğmasın.
+      - name: Varlıkları topla
+        run: |
+          cp docs/ekran-goruntusu.png site/ekran-goruntusu.png
+          cp src-tauri/icons/128x128@2x.png site/ikon.png
+          cp src/assets/fonts/outfit-latin.woff2 site/outfit-latin.woff2
+          cp src/assets/fonts/outfit-latin-ext.woff2 site/outfit-latin-ext.woff2
+          # Jekyll'i devre dışı bırak: düz statik dosyalar yayınlanacak.
+          touch site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: dagitim
+        uses: actions/deploy-pages@v4
