@@ -20,8 +20,12 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
 - [x] `README.md` yazıldı
 - [x] `.gitignore` eklendi
 - [x] Tauri proje iskeleti kuruldu, `npm run build` + `cargo check` temiz
-- [ ] GitHub reposu oluşturulacak / mevcut repoya bağlanacak **(İlker yapacak)**
-- [ ] İlk commit atılacak (`master` branch'inde hâlâ hiç commit yok)
+- [x] İlk commit atıldı (`main` dalı, 80 dosya)
+- [ ] GitHub reposu oluşturulacak ve remote bağlanacak **(İlker yapacak —
+      `gh` CLI kurulu olmadığı için oturumdan oluşturulamadı)**
+- [ ] Repo URL'si belli olunca `Cargo.toml`, `README.md` ve `NOTICE` içindeki
+      `github.com/ilker/muiget` yer tutucusu düzeltilecek; README'ye CI rozeti
+      eklenecek
 - [~] `NOTICE` gerçek bağımlılık ağacından yeniden üretilecek — şu an yalnızca
       doğrudan bağımlılıkları listeliyor. **Yayın öncesi zorunlu:**
       `cargo about generate` + `npx license-checker --production`
@@ -154,7 +158,14 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
       da indirme klasörü dışına kaydedilen indirmeler açılışta gelmiyor.
       Bilinçli sınır (karar #15); şikâyet gelirse "son kullanılan klasörler"
       listesi düşünülebilir.
-- [ ] CI kurulumu (GitHub Actions: `cargo test`, `npm run build`, `cargo clippy`)
+- [x] CI kurulumu (`.github/workflows/ci.yml`): ubuntu'da `npm run build`,
+      windows'ta `cargo test` + `cargo clippy -D warnings`. Rust işi arayüzü de
+      derliyor, çünkü `generate_context!` derleme anında `dist/` klasörünü arıyor.
+- [ ] **CI'da zamanlamaya bağlı test riski.** `duraklat_ve_devam_et_dosyayi_bozmuyor`
+      ve benzerleri 80–120 ms bekleyip indirmeyi akarken yakalıyor. Yerelde
+      kararlı ama yavaş bir runner'da "duraklatmadan önce hiç veri inmemiş"
+      diye patlayabilir. İlk yeşil koşudan sonra birkaç çalıştırma izlenmeli;
+      titrerse eşikler yavaş sunucunun parça aralığına göre büyütülmeli.
 - [x] `cargo clippy --all-targets` temiz (CI'a eklenmesi bekliyor)
 - [ ] Uygulama ikonu (şu an varsayılan Tauri ikonları kullanılıyor)
 

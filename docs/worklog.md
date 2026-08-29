@@ -7,6 +7,54 @@ Format: Tarih, yapılanlar, kararlar, sıradaki adım.
 
 ---
 
+## 2026-08-29 (6. oturum) — İlk Commit, CI ve İlk Yayın Build'i
+
+**İlk commit atıldı.** Dal `master` → `main` olarak yeniden adlandırıldı
+(GitHub varsayılanı; boş repoda risksiz). 80 dosya, 20.104 satır. Commit öncesi
+staged liste tek tek gözden geçirildi: hassas dosya yok, en büyük dosya 277 KB
+(`icon.icns`).
+
+`.gitattributes` eklendi: depoda satır sonları LF, ikili dosyalar dönüşüm dışı.
+Olmasaydı Windows'ta yazılan dosyalar Linux'tan katkı verildiğinde "tüm dosya
+değişti" diye görünürdü. Kilit dosyaları `linguist-generated` işaretlendi ki
+GitHub dil istatistiklerini şişirmesin.
+
+**CI kuruldu** (`.github/workflows/ci.yml`) — teknik borç listesindeki madde:
+- ubuntu: `npm ci` + `npm run build`
+- windows: `cargo test` + `cargo clippy --all-targets -- -D warnings`
+
+Rust işi arayüzü de derliyor, çünkü `generate_context!` derleme anında
+`tauri.conf.json`'daki `frontendDist` (yani `dist/`) klasörünü arıyor; o olmadan
+`cargo test` bile başlamıyor. Windows seçildi: projenin birincil hedefi orası ve
+Tauri'nin Linux'ta istediği webkit2gtk/gtk paketlerini kurmak gerekmiyor.
+
+**İlk yayın build'i alındı** (`npm run tauri build`, 2 dk 45 sn):
+
+| Çıktı | Boyut |
+|---|---|
+| `muiget.exe` | 14,1 MB |
+| `Muiget_0.1.0_x64_en-US.msi` | 4,9 MB |
+| `Muiget_0.1.0_x64-setup.exe` (NSIS) | 3,4 MB |
+
+Tauri, WiX 3.14'ü kendisi indirip MSI'ı üretti. README'deki "Electron'a göre çok
+daha küçük binary" iddiası artık ölçülmüş rakamlarla yazıyor; ölçülmemiş RAM
+iddiası ise çıkarıldı.
+
+**Duman testi:** yayın binary'si `--native-host` kipinde çalıştırıldı (bu kip
+pencere açmıyor), stdin EOF'ta temiz çıktı — çıkış kodu 0. Yani paketlenen
+binary yükleniyor ve native messaging yolu ayakta.
+
+**Yapılamayan:** GitHub reposu oluşturulamadı — `gh` CLI kurulu değil ve ortamda
+token yok. İlker repoyu github.com'dan açacak (public), URL gelince remote
+eklenip push edilecek. `Cargo.toml`, `README.md` ve `NOTICE` içindeki
+`github.com/ilker/muiget` yer tutucusu gerçek kullanıcı adına göre güncellenmeli.
+
+**Uygulamanın kendisi hâlâ gerçek pencerede denenmedi.** Build üretiliyor ve
+binary yükleniyor ama arayüz yalnızca tarayıcı önizlemesinde görüldü. IDM hız
+karşılaştırması, Chrome köprü denemesi ve OS bildirimi de aynı kefede.
+
+---
+
 ## 2026-08-29 (5. oturum) — Arayüz: Araç Çubuğu, Kısayollar, OS Bildirimi
 
 Faz 3'ün işaretsiz kalan üç maddesi kapandı, üstüne toplu eylem eklendi.

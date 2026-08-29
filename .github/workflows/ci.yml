@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Aynı dal için üst üste gelen çalıştırmaların eskisini iptal et: art arda
+# atılan iki commit'te ilkini sonuna kadar beklemenin bir faydası yok.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: Arayüz (tsc + vite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+  rust:
+    name: Motor (test + clippy)
+    # Windows: projenin birincil hedefi burası ve Tauri'nin Linux'ta istediği
+    # webkit2gtk/gtk geliştirme paketlerini kurmak gerekmiyor.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Rust derlemesi `dist/` olmadan başarısız olur: `tauri.conf.json`
+      # içindeki `frontendDist` yolunu `generate_context!` derleme anında
+      # arıyor. Bu yüzden testten önce arayüz derleniyor.
+      - run: npm ci
+      - run: npm run build
+
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings

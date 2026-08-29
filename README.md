@@ -32,8 +32,9 @@ anahtarı satın alması gerekmeyen, kodunu herkesin okuyup değiştirebildiği 
   ([kurulum](extension/README.md)).
 - **Torrent** — Magnet link ve `.torrent` desteği (librqbit motoru).
   *Henüz eklenmedi, bkz. yol haritası.*
-- **Düşük kaynak tüketimi** — Tauri v2 + Rust; Electron tabanlı alternatiflere
-  göre çok daha az RAM, çok daha küçük binary.
+- **Küçük** — Tauri v2 + Rust. Windows x64 kurulum paketi **3,4 MB**
+  (NSIS; MSI 4,9 MB), kurulu uygulama 14,1 MB. Electron tabanlı bir indirme
+  yöneticisi tipik olarak bunun on katından fazlasını kaplıyor.
 - **Telemetri yok** — Hiçbir veri toplanmaz, hiçbir sunucuya bir şey gönderilmez.
 
 ## Ne Yapmaz
@@ -51,13 +52,13 @@ hedefleyen özellik talepleri kabul edilmez.
 
 ## Ekran Görüntüsü
 
-<!-- TODO: Faz 3 (UI) tamamlandığında buraya gerçek ekran görüntüsü eklenecek -->
-
-> _Arayüz henüz yazılmadı. Ekran görüntüsü Faz 3'te eklenecek._
+<!-- TODO: Uygulamanın kendi penceresinden alınmış ekran görüntüsü eklenecek. -->
 
 ## Kurulum
 
-> _Henüz yayınlanmış bir sürüm yok. Aşağıdaki adımlar kaynaktan derleme içindir._
+> _Henüz yayınlanmış bir sürüm yok. Aşağıdaki adımlar kaynaktan derleme
+> içindir; `npm run tauri build` Windows'ta hem `.msi` hem `.exe` kurulum
+> paketi üretiyor (`src-tauri/target/release/bundle/`)._
 
 ### Gereksinimler
 
