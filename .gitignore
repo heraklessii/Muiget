@@ -1,0 +1,57 @@
+# --- Rust / Cargo ---
+target/
+**/*.rs.bk
+*.pdb
+
+# --- Tauri ---
+src-tauri/target/
+src-tauri/gen/
+src-tauri/WixTools/
+src-tauri/.tauri/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+dist-ssr/
+build/
+.vite/
+*.local
+
+# --- Paket yöneticisi logları ---
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# --- Ortam değişkenleri (asla commit'lenmez) ---
+.env
+.env.*
+!.env.example
+
+# --- Muiget çalışma zamanı dosyaları ---
+# Resume meta dosyaları ve yarım kalan indirmeler asla repoya girmez
+*.muiget
+*.muiget.tmp
+downloads/
+test-downloads/
+
+# --- Editör / IDE ---
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+
+# --- İşletim sistemi ---
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# --- Test / kapsam çıktıları ---
+coverage/
+*.profraw
+*.profdata

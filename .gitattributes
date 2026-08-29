@@ -1,0 +1,17 @@
+# Satır sonları depoda her zaman LF tutulur, çalışma kopyasında platformun
+# kendi biçimine çevrilir. Olmazsa Windows'ta yazılan bir dosya Linux'ta
+# katkı verildiğinde "tüm dosya değişti" diye görünür.
+* text=auto eol=lf
+
+# İkili dosyalar: Git bunlara satır sonu dönüşümü uygulamamalı.
+*.png   binary
+*.ico   binary
+*.icns  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+
+# GitHub dil istatistiklerinde üretilmiş dosyalar sayılmasın.
+package-lock.json  linguist-generated
+src-tauri/Cargo.lock linguist-generated

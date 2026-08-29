@@ -1,0 +1,1178 @@
+/*
+ * ============================================================================
+ * MUIGET — arayüz tasarım sistemi
+ * ============================================================================
+ *
+ * Tasarım dili Mui ailesinden (Muita ve Muitoon) geliyor: teal vurgu (#2dd4bf),
+ * koyu zemin (#0f1115), panel (#181b22), Outfit yazı tipi. Aynı ailenin
+ * uygulamaları aynı dili konuşsun diye jeton isimleri de Muita ile hizalı.
+ *
+ * Sıra: font → jeton → taban → kontroller → kabuk → indirme listesi →
+ * diyaloglar → bildirimler → yardımcı sınıflar.
+ *
+ * Kural: bileşen kodunda ASLA renk/ölçü sabiti yok. Hepsi buradaki
+ * değişkenlerden geliyor; tema `<html data-theme>` ile değişiyor.
+ */
+
+/* ---------------------------------------------------------------------------
+ * Font — Outfit
+ *
+ * Dosyalar uygulamaya GÖMÜLÜ, CDN yok: Muiget tamamen çevrimdışı açılmalı ve
+ * bir indirme yöneticisinin kendi arayüzü için ağa çıkması saçma olurdu.
+ * `latin-ext` alt kümesi Türkçe için şart (ğ ş İ ı Ş Ğ).
+ * ------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url('./assets/fonts/outfit-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url('./assets/fonts/outfit-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------------------------------------------------------------------------
+ * Renk jetonları
+ *
+ * Vurgu rengi YALNIZ arayüz kromunda: birincil düğme, aktif sekme, odak halkası,
+ * ilerleme çubuğu. Durum renkleri (indiriliyor / duraklatıldı / hata) kendi
+ * ailelerinde kalıyor ki "aktif" ile "bitti" karışmasın.
+ * ------------------------------------------------------------------------- */
+
+:root,
+:root[data-theme='dark'] {
+  --bg: #0f1115;
+  --bg-panel: #181b22;
+  --bg-elevated: #20242d;
+  --bg-sunken: #0b0d11;
+  --border: #262b35;
+  --border-strong: #333a47;
+  --text: #e8eaed;
+  --text-muted: #8b93a3;
+
+  --accent: #2dd4bf;
+  --accent-strong: #5eead4;
+  --accent-soft: rgb(45 212 191 / 12%);
+  --accent-line: rgb(45 212 191 / 34%);
+  /* Teal AÇIK bir renk: üstündeki yazı koyu olmak zorunda. */
+  --on-accent: #04211d;
+
+  --error: #ff7a6b;
+  --warning: #fbbf24;
+  /* Başarı yeşili kasten teal'den uzak (limon): "bitti" ile "iniyor" ayrışsın. */
+  --ok: #a3e635;
+  --paused: #94a3b8;
+
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-2: 0 8px 24px -6px rgb(0 0 0 / 60%);
+  --shadow-3: 0 24px 64px -12px rgb(0 0 0 / 70%);
+
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --bg: #eef1f5;
+  --bg-panel: #ffffff;
+  --bg-elevated: #f2f4f8;
+  --bg-sunken: #e7eaf0;
+  --border: #dde1e9;
+  --border-strong: #c3c9d4;
+  --text: #12151a;
+  --text-muted: #5d6675;
+
+  /* Aynı teal açık zeminde okunmuyor; doygun/koyu ucu (teal-600). */
+  --accent: #0d9488;
+  --accent-strong: #0f766e;
+  --accent-soft: rgb(13 148 136 / 10%);
+  --accent-line: rgb(13 148 136 / 30%);
+  --on-accent: #ffffff;
+
+  --error: #c0392b;
+  --warning: #b45309;
+  --ok: #4d7c0f;
+  --paused: #64748b;
+
+  --shadow-1: 0 1px 2px rgb(18 21 26 / 8%);
+  --shadow-2: 0 8px 24px -6px rgb(18 21 26 / 14%);
+  --shadow-3: 0 24px 64px -12px rgb(18 21 26 / 20%);
+
+  color-scheme: light;
+}
+
+/* ---------------------------------------------------------------------------
+ * Ölçek
+ * ------------------------------------------------------------------------- */
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 22px;
+  --space-6: 32px;
+
+  --font-ui: 'Outfit', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-md: 13px;
+  --font-lg: 15px;
+  --font-xl: 19px;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  --control-height: 32px;
+  --topbar-height: 52px;
+  --statusbar-height: 28px;
+
+  --ease: cubic-bezier(0.2, 0.6, 0.3, 1);
+  --t-fast: 110ms;
+  --t-med: 180ms;
+}
+
+/* ---------------------------------------------------------------------------
+ * Taban
+ * ------------------------------------------------------------------------- */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--font-md);
+  line-height: 1.5;
+  letter-spacing: 0.005em;
+  /* Sabit genişlikli rakam: hız ve yüzde değerleri her yenilemede zıplamasın. */
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Arayüz kromu seçilemiyor ama BİLGİ olan metin kopyalanabilmeli: dosya adı,
+   hedef yol, hata mesajı. */
+.selectable,
+.download__name,
+.download__path,
+.download__error,
+.toast span {
+  user-select: text;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--radius-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/*
+ * Satır içi SVG'lerin taban boyutu.
+ *
+ * Boyutsuz bir `<svg>` varsayılan olarak 300×150 çiziliyor ve bir metin
+ * satırının içinde sayfayı ele geçiriyor. Her ikon için tek tek kural yazmak
+ * yerine taban burada veriliyor; ihtiyaç duyan yer (marka, boş durum) üzerine
+ * yazıyor. `flex: 0 0 auto` da şart: esnek bir kapsayıcıda ikon sıkışıp
+ * genişliğini kaybediyordu.
+ */
+svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+/* ---------------------------------------------------------------------------
+ * Kontroller
+ * ------------------------------------------------------------------------- */
+
+.button {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-3);
+  min-height: var(--control-height);
+  font: inherit;
+  font-size: var(--font-md);
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+  transition:
+    border-color var(--t-fast) var(--ease),
+    background-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-panel);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.button.ghost:hover:not(:disabled) {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-color: transparent;
+}
+
+/* Akışın ana adımı — bir ekranda tek belirgin düğme. */
+.button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: var(--shadow-1);
+}
+
+.button.primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.button.small {
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  font-size: var(--font-sm);
+}
+
+.button.danger:hover:not(:disabled) {
+  border-color: var(--error);
+  color: var(--error);
+  background: transparent;
+}
+
+.button.icon {
+  padding: 0;
+  width: var(--control-height);
+  min-width: var(--control-height);
+}
+
+.button.icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.button.small.icon {
+  width: 26px;
+  min-width: 26px;
+}
+
+.button.small.icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.text-input,
+.select {
+  background: var(--bg-sunken);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-3);
+  min-height: var(--control-height);
+  font: inherit;
+  font-size: var(--font-md);
+  min-width: 0;
+  transition:
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+
+.text-input:focus,
+.select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.text-input::placeholder {
+  color: var(--text-muted);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.field > span {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+.field.row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.field-hint {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  line-height: 1.45;
+}
+
+.switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
+}
+
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition:
+    transform var(--t-med) var(--ease),
+    background-color var(--t-fast) var(--ease);
+}
+
+.switch[aria-checked='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.switch[aria-checked='true']::after {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
+/* ---------------------------------------------------------------------------
+ * Kabuk
+ * ------------------------------------------------------------------------- */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--topbar-height);
+  padding: 0 var(--space-3);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-right: var(--space-3);
+  font-size: var(--font-lg);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.brand svg {
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+}
+
+.topbar-spacer {
+  flex: 1 1 auto;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+}
+
+.tabs button {
+  background: transparent;
+  color: var(--text-muted);
+  border: 0;
+  border-radius: 6px;
+  padding: 5px var(--space-3);
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+
+.tabs button:hover:not(.is-active) {
+  color: var(--text);
+  background: var(--bg-elevated);
+}
+
+.tabs button.is-active {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.tabs .tab-count {
+  opacity: 0.7;
+  margin-left: var(--space-1);
+}
+
+/* Filtre + arama + sıralama + toplu eylemler. Üst çubuğun altında kendi
+   satırında duruyor: hepsi oraya sığmıyordu ve dar pencerede taşıyordu.
+   `wrap` bilinçli — 800 px altında araç çubuğu iki satıra iniyor, kesilmiyor. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* Arama kutusu boşluğu yiyen öge: sıralama ve toplu eylemler sabit
+     genişlikte, artan yer aramaya kalsın. */
+  flex: 1 1 180px;
+  min-width: 150px;
+}
+
+.search__icon {
+  position: absolute;
+  left: var(--space-2);
+  width: 15px;
+  height: 15px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.search .text-input {
+  width: 100%;
+  /* İkon solda, temizle düğmesi sağda; metin ikisinin arasında kalsın. */
+  padding-left: 30px;
+  padding-right: 28px;
+}
+
+.search__clear {
+  position: absolute;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+
+.search__clear svg {
+  width: 13px;
+  height: 13px;
+}
+
+.search__clear:hover {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.toolbar .select {
+  flex: 0 0 auto;
+  font-size: var(--font-sm);
+}
+
+/* Toplu eylemler bir arada sarsın: dar pencerede "Tümünü duraklat" üst,
+   "Tümünü sürdür" alt satırda kalırsa ikisi ilgisiz görünüyor. */
+.toolbar__actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.toolbar__actions:empty {
+  display: none;
+}
+
+.content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 0 var(--space-3);
+  height: var(--statusbar-height);
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  flex: 0 0 auto;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.statusbar strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.statusbar .push {
+  margin-left: auto;
+}
+
+.statusbar .limit-on {
+  color: var(--warning);
+}
+
+.speed-graph {
+  display: inline-flex;
+  align-items: center;
+  /* Grafiğin dibi durum çubuğunun taban çizgisine otursun. */
+  margin-bottom: -3px;
+}
+
+/* Taban `svg` kuralı 16×16 dayatıyor ve CSS, öğedeki width/height
+   özniteliklerini eziyor; grafiğin kendi ölçüsünü geri alması gerekiyor. */
+.speed-graph svg {
+  width: 108px;
+  height: 18px;
+}
+
+.speed-graph__line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.speed-graph__area {
+  fill: var(--accent-soft);
+  stroke: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * İndirme listesi
+ * ------------------------------------------------------------------------- */
+
+.downloads {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.download {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  transition: border-color var(--t-fast) var(--ease);
+}
+
+.download:hover {
+  border-color: var(--border-strong);
+}
+
+.download.is-running {
+  border-color: var(--accent-line);
+}
+
+.download.is-failed {
+  border-left: 3px solid var(--error);
+}
+
+.download__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.download__icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+}
+
+.download__title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.download__name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  margin-top: 1px;
+}
+
+.download__meta .dot::before {
+  content: '·';
+  margin-right: var(--space-2);
+}
+
+.download__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+}
+
+/* ---- İlerleme çubuğu ---- */
+
+.progress {
+  position: relative;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.progress__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  transition: width var(--t-med) var(--ease);
+}
+
+.download.is-paused .progress__fill {
+  background: var(--paused);
+}
+
+.download.is-completed .progress__fill {
+  background: var(--ok);
+}
+
+.download.is-failed .progress__fill {
+  background: var(--error);
+}
+
+/*
+ * Segment şeridi: her segmentin kendi doluluğu ayrı ayrı görünüyor.
+ * IDM'in en okunaklı özelliklerinden biri bu — kullanıcı hangi parçanın
+ * takıldığını tek bakışta görüyor.
+ */
+.segments {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+}
+
+.segment {
+  flex: 1 1 0;
+  min-width: 2px;
+  position: relative;
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.segment__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent-line);
+  transition: width var(--t-med) var(--ease);
+}
+
+.segment.is-active .segment__fill {
+  background: var(--accent);
+}
+
+.segment.is-done .segment__fill {
+  background: var(--ok);
+  opacity: 0.55;
+}
+
+.download__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.download__foot .push {
+  margin-left: auto;
+}
+
+.download__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+  font-size: var(--font-xs);
+}
+
+.download__error {
+  color: var(--error);
+  font-size: var(--font-sm);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.download__warning {
+  color: var(--warning);
+  font-size: var(--font-sm);
+  line-height: 1.45;
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  margin: 0;
+}
+
+.download__warning svg {
+  width: 15px;
+  height: 15px;
+  /* İkon metnin ilk satırıyla hizalansın. */
+  margin-top: 2px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.badge.running {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.badge.completed {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 34%, transparent);
+}
+
+.badge.failed {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 34%, transparent);
+}
+
+.badge.paused {
+  color: var(--paused);
+}
+
+/* Kuyrukta bekleyen indirme: görünür ama dikkat çekmeyen bir rozet —
+   kullanıcının "neden başlamadı?" diye sormaması için. */
+.badge.queued {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
+/* ---- Boş durum ---- */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* Boş durumdaki aranan kelime, cümlenin geri kalanından ayrılsın. */
+.empty strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.empty svg {
+  width: 44px;
+  height: 44px;
+  opacity: 0.4;
+}
+
+.empty h2 {
+  margin: 0;
+  font-size: var(--font-lg);
+  color: var(--text);
+}
+
+.empty p {
+  margin: 0;
+  max-width: 380px;
+  line-height: 1.6;
+}
+
+/* ---------------------------------------------------------------------------
+ * Diyaloglar
+ * ------------------------------------------------------------------------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgb(0 0 0 / 45%);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
+  animation: fade-in var(--t-med) var(--ease);
+}
+
+.dialog {
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  animation: rise var(--t-med) var(--ease);
+}
+
+.dialog__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.dialog__head h2 {
+  margin: 0;
+  font-size: var(--font-xl);
+  flex: 1 1 auto;
+}
+
+.dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.dialog__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.dialog__foot .push {
+  margin-right: auto;
+}
+
+.preview {
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: var(--space-2) var(--space-3);
+  font-size: var(--font-sm);
+}
+
+.preview dt {
+  color: var(--text-muted);
+}
+
+.preview dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.preview .yes {
+  color: var(--ok);
+}
+
+.preview .no {
+  color: var(--warning);
+}
+
+.section-title {
+  margin: 0;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.rule {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+}
+
+.rule .text-input {
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  font-size: var(--font-sm);
+}
+
+.rule .time {
+  width: 76px;
+  text-align: center;
+}
+
+.rule .limit {
+  width: 88px;
+}
+
+.rule__sep {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+/* ---------------------------------------------------------------------------
+ * Bildirimler
+ * ------------------------------------------------------------------------- */
+
+.toast-stack {
+  position: fixed;
+  right: var(--space-4);
+  /* Durum çubuğunun üstünde — yükseklik jetondan türetiliyor ki çubuk
+     değişince bildirimler onun altında kalmasın. */
+  bottom: calc(var(--statusbar-height) + var(--space-3));
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: min(380px, calc(100vw - var(--space-4) * 2));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  box-shadow: var(--shadow-2);
+  animation: rise var(--t-med) var(--ease);
+}
+
+.toast span {
+  flex: 1;
+}
+
+.toast.success {
+  border-left: 3px solid var(--ok);
+}
+
+.toast.error {
+  border-left: 3px solid var(--error);
+}
+
+.toast.info {
+  border-left: 3px solid var(--accent);
+}
+
+.toast button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  font-size: var(--font-md);
+  line-height: 1;
+}
+
+.toast button:hover {
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+ * Yardımcılar
+ * ------------------------------------------------------------------------- */
+
+.muted {
+  color: var(--text-muted);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Hareketi azalt tercihine saygı: animasyonlar kapanıyor ama düzen bozulmuyor. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

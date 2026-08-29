@@ -1,0 +1,50 @@
+[package]
+name = "muiget"
+version = "0.1.0"
+description = "Acik kaynak indirme yoneticisi - segmentli HTTP indirme + torrent"
+authors = ["Muiget Contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/ilker/muiget"
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "muiget_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3" }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.11.3", features = ["tray-icon"] }
+tauri-plugin-log = "2"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time"] }
+futures-util = "0.3.34"
+thiserror = "2.0.20"
+uuid = { version = "1.20.0", features = ["v4", "serde"] }
+tokio-util = { version = "0.7.19", features = ["rt"] }
+
+# DIKKAT: gzip/brotli/deflate ozellikleri BILEREK kapali. reqwest otomatik
+# decompress ederse okunan byte sayisi ile Content-Length / Range araligi
+# tutmaz ve segment muhasebesi bozulur. Istekler ayrica
+# `Accept-Encoding: identity` gonderiyor (bkz. download/http.rs).
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls", "http2", "charset"] }
+
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
+base64 = "0.23.1"
+tauri-plugin-single-instance = "2.4.3"
+tauri-plugin-notification = "2.3.3"
+
+# Faz 4'te eklenecek: librqbit
+# Bkz. docs/tasks.md
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time", "net"] }
+tempfile = "3"

@@ -1,0 +1,194 @@
+/*
+ * Popup stilleri — ana uygulamanın (Mui ailesi) tasarım diliyle aynı palet.
+ * Uzantı Chrome'un içinde çalıştığı için jetonlar burada tekrar tanımlanıyor;
+ * uygulamanın CSS'ini paylaşmak MV3'te mümkün değil.
+ */
+
+:root {
+  --bg: #0f1115;
+  --panel: #181b22;
+  --border: #262b35;
+  --text: #e8eaed;
+  --muted: #8b93a3;
+  --accent: #2dd4bf;
+  --ok: #a3e635;
+  --error: #ff7a6b;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff;
+    --panel: #f2f4f8;
+    --border: #dde1e9;
+    --text: #12151a;
+    --muted: #5d6675;
+    --accent: #0d9488;
+    --ok: #4d7c0f;
+    --error: #c0392b;
+    color-scheme: light;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 340px;
+  margin: 0;
+  padding: 12px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.head h1 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.durum {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.durum.acik {
+  color: var(--ok);
+}
+
+.durum.kapali {
+  color: var(--error);
+}
+
+.bolum {
+  margin-bottom: 12px;
+}
+
+.bolum h2 {
+  margin: 0 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.medya {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.medya .bos {
+  margin: 0;
+  padding: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.ogeler {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.oge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.oge:last-child {
+  border-bottom: none;
+}
+
+.oge__ad {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oge__tur {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  flex: 0 0 auto;
+}
+
+.oge button {
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.oge button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.oge button:disabled {
+  opacity: 0.5;
+  cursor: default;
+  color: var(--muted);
+}
+
+.satir {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.satir span {
+  flex: 1;
+}
+
+.satir small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.satir input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.alt {
+  min-height: 16px;
+}
+
+.hata {
+  color: var(--error);
+  font-size: 11px;
+}

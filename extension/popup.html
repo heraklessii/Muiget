@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Muiget</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="head">
+      <h1>Muiget</h1>
+      <span id="durum" class="durum">bağlantı kontrol ediliyor…</span>
+    </header>
+
+    <section class="bolum">
+      <h2>Bu sayfadaki dosyalar</h2>
+      <div id="medya" class="medya">
+        <p class="bos">Taranıyor…</p>
+      </div>
+    </section>
+
+    <section class="bolum">
+      <h2>Ayarlar</h2>
+
+      <label class="satir">
+        <span>
+          İndirmeleri devral
+          <small>Chrome'un başlattığı indirmeler Muiget'e aktarılır</small>
+        </span>
+        <input type="checkbox" id="devral" />
+      </label>
+
+      <label class="satir">
+        <span>
+          Çerezleri gönder
+          <small>Giriş gerektiren dosyalar için. Oturum bilgisi paylaşılır.</small>
+        </span>
+        <input type="checkbox" id="cerez" />
+      </label>
+    </section>
+
+    <footer class="alt">
+      <span id="hata" class="hata"></span>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

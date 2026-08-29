@@ -1,0 +1,143 @@
+Muiget
+Copyright 2026 Muiget Contributors
+
+This product includes software developed by the Muiget project
+(https://github.com/ilker/muiget).
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file
+for the full license text.
+
+================================================================================
+THIRD-PARTY SOFTWARE NOTICES
+================================================================================
+
+This product includes, or is planned to include, third-party software
+components listed below. Each component remains under its own license.
+
+--------------------------------------------------------------------------------
+librqbit — BitTorrent engine
+  Copyright (c) 2021 Igor Katson
+  License: Apache License 2.0
+  https://github.com/ikatson/rqbit
+
+  Licensed under the Apache License, Version 2.0. A copy of the license is
+  included in the LICENSE file of this distribution.
+
+--------------------------------------------------------------------------------
+Tauri — desktop application framework
+  Copyright (c) 2019-2026 Tauri Programme within The Commons Conservancy
+  License: Apache License 2.0 OR MIT
+  https://github.com/tauri-apps/tauri
+
+--------------------------------------------------------------------------------
+Tokio — asynchronous runtime
+  Copyright (c) Tokio Contributors
+  License: MIT
+  https://github.com/tokio-rs/tokio
+
+--------------------------------------------------------------------------------
+reqwest — HTTP client
+  Copyright (c) 2016-2026 Sean McArthur
+  License: Apache License 2.0 OR MIT
+  https://github.com/seanmonstar/reqwest
+
+--------------------------------------------------------------------------------
+Serde — serialization framework
+  Copyright (c) Erick Tryzelaar and David Tolnay
+  License: Apache License 2.0 OR MIT
+  https://github.com/serde-rs/serde
+
+--------------------------------------------------------------------------------
+React — user interface library
+  Copyright (c) Meta Platforms, Inc. and affiliates
+  License: MIT
+  https://github.com/facebook/react
+
+--------------------------------------------------------------------------------
+Vite — frontend build tool
+  Copyright (c) 2019-present VoidZero Inc. and Vite contributors
+  License: MIT
+  https://github.com/vitejs/vite
+
+--------------------------------------------------------------------------------
+TypeScript — programming language
+  Copyright (c) Microsoft Corporation
+  License: Apache License 2.0
+  https://github.com/microsoft/TypeScript
+
+--------------------------------------------------------------------------------
+futures-rs (futures-util) — async utilities
+  Copyright (c) 2016 Alex Crichton, 2017 The Tokio Authors
+  License: Apache License 2.0 OR MIT
+  https://github.com/rust-lang/futures-rs
+
+--------------------------------------------------------------------------------
+thiserror — error derive macros
+  Copyright (c) David Tolnay
+  License: Apache License 2.0 OR MIT
+  https://github.com/dtolnay/thiserror
+
+--------------------------------------------------------------------------------
+tokio-util — Tokio utilities (CancellationToken)
+  Copyright (c) Tokio Contributors
+  License: MIT
+  https://github.com/tokio-rs/tokio
+
+--------------------------------------------------------------------------------
+uuid — UUID generation
+  Copyright (c) 2014 The Rust Project Developers
+  License: Apache License 2.0 OR MIT
+  https://github.com/uuid-rs/uuid
+
+--------------------------------------------------------------------------------
+chrono — date and time library
+  Copyright (c) 2014 Kang Seonghoon and contributors
+  License: Apache License 2.0 OR MIT
+  https://github.com/chronotope/chrono
+
+--------------------------------------------------------------------------------
+tauri-plugin-notification — işletim sistemi bildirimleri
+  Copyright (c) 2019-2026 Tauri Programme within The Commons Conservancy
+  License: Apache License 2.0 OR MIT
+  https://github.com/tauri-apps/plugins-workspace
+
+  Platform arka uçlarını da beraberinde getiriyor: Windows'ta
+  tauri-winrt-notification (Apache-2.0 OR MIT), Linux'ta notify-rust (MIT OR
+  Apache-2.0), macOS'ta mac-notification-sys (MIT).
+
+--------------------------------------------------------------------------------
+rustls — TLS implementation (used by reqwest)
+  Copyright (c) 2016 Joseph Birr-Pixton
+  License: Apache License 2.0 OR ISC OR MIT
+  https://github.com/rustls/rustls
+
+================================================================================
+BUNDLED FONTS
+================================================================================
+
+--------------------------------------------------------------------------------
+Outfit — user interface typeface
+  Copyright (c) 2020 The Outfit Project Authors
+  License: SIL Open Font License, Version 1.1
+  https://github.com/Outfitio/Outfit-Fonts
+
+  The font files in src/assets/fonts/ are subject to the SIL OFL 1.1, not the
+  Apache License 2.0. The OFL permits bundling and redistribution with software;
+  the font itself may not be sold on its own. Full license text:
+  https://openfontlicense.org/
+
+================================================================================
+NOTE ON COMPLETENESS
+================================================================================
+
+The list above covers the DIRECT dependencies declared in src-tauri/Cargo.toml
+and package.json. It is NOT the complete transitive dependency tree.
+
+Before the first public release this file must be regenerated from the actual
+lockfiles, for example:
+
+    cargo install cargo-about && cargo about generate about.hbs
+    npx license-checker --production --summary
+
+Regenerating this NOTICE is a release-blocking task; it is tracked in
+docs/tasks.md.

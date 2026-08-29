@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Muiget",
+  "version": "0.1.0",
+  "description": "Bağlantıları Muiget indirme yöneticisine gönderir. Çoklu bağlantı, kaldığı yerden devam.",
+  "minimum_chrome_version": "116",
+
+  "permissions": ["contextMenus", "nativeMessaging", "storage", "activeTab", "scripting"],
+
+  "optional_permissions": ["downloads", "cookies"],
+  "optional_host_permissions": ["<all_urls>"],
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "action": {
+    "default_title": "Muiget",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "32": "icons/32.png",
+      "128": "icons/128.png"
+    }
+  },
+
+  "icons": {
+    "32": "icons/32.png",
+    "128": "icons/128.png"
+  }
+}
