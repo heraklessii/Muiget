@@ -79,9 +79,15 @@ klasörleri silindi (proje masaüstü hedefliyor).
   Windows kurulum paketlerini derleyip GitHub Release'ine yüklüyor. Ön sürüm
   olarak işaretleniyor: 0.1.0 sahada geniş çapta denenmedi.
 - `.github/workflows/pages.yml` — `site/` klasörünü GitHub Pages'e yayınlıyor.
-  `configure-pages` `enablement: true` ile Pages'i kendisi açıyor, elle ayar
-  gerekmiyor. Ekran görüntüsü, ikon ve fontlar depodaki tek kopyadan
-  kopyalanıyor.
+  Ekran görüntüsü, ikon ve fontlar depodaki tek kopyadan kopyalanıyor.
+
+  İlk deneme `actions/deploy-pages` ile yapıldı ve **başarısız oldu**:
+  `configure-pages`in `enablement: true` seçeneği varsayılan `GITHUB_TOKEN`
+  ile Pages sitesi oluşturamıyor, çünkü bu işlem depo yöneticisi yetkisi
+  istiyor. İş akışı ilk adımda düştü. Çözüm `gh-pages` dalına itmek: yalnızca
+  `contents: write` gerekiyor, elle ayar değişikliği gerekmiyor ve dalın
+  varlığı Pages'i kendiliğinden açıyor (GitHub'ın kendi
+  "pages build and deployment" işi tetikleniyor).
 - `site/index.html` — tanıtım sayfası. "Ne yapmaz" bölümü sayfanın ortasında,
   kendi zemininde duruyor: projenin sınırı gizlenecek bir şey değil.
 

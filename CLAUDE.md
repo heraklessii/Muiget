@@ -55,7 +55,11 @@ muiget/
 ├── tsconfig.json               ✅ Tek tsconfig (src + vite.config.ts)
 ├── vite.config.ts              ✅ Port 1420, strictPort, src-tauri watch ignore
 ├── index.html                  ✅
+├── .github/workflows/          ✅ ci.yml, release.yml, pages.yml
+├── site/                       ✅ GitHub Pages tanıtım sayfası (index.html)
+├── tools/                      ✅ ikon-uret.js (uygulama ikonu üretici)
 ├── docs/
+│   ├── ekran-goruntusu.png     ✅ Uygulamanın kendi penceresinden
 │   ├── project_overview.md     ✅ Ürün vizyonu, hedef kitle, rakip analizi
 │   ├── decisions.md            ✅ Mimari kararlar (ADR tarzı, kronolojik)
 │   ├── worklog.md              ✅ Oturum bazlı ilerleme günlüğü
@@ -113,7 +117,7 @@ npm run dev       # sadece frontend (Vite, localhost:1420)
 npm run build     # tsc + vite build → dist/
 npm run tauri dev # tam uygulama (Rust + pencere)
 cargo check       # src-tauri/ içinde, hızlı Rust doğrulaması
-cargo test        # 128 birim + 12 uçtan uca test
+cargo test        # 130 birim + 13 uçtan uca test
 ```
 
 Uçtan uca testler (`src-tauri/tests/indirme_uctan_uca.rs`) elle yazılmış küçük
@@ -159,7 +163,9 @@ Detaylar için `docs/decisions.md`. Kısa özet:
 ## Sıradaki Adım
 
 **Faz 0, 1, 2, 3 ve 5 tamamlandı.** Çalışan bir segmentli indirme motoru, tam
-bir arayüz ve Chrome uzantısı var. 140 test geçiyor.
+bir arayüz ve Chrome uzantısı var. 143 test geçiyor. Uygulama gerçek
+penceresinde uçtan uca doğrulandı (8 MB dosya, 8 paralel segment, SHA-256
+birebir aynı) ve v0.1.0 ön sürümü yayınlandı.
 
 Ayrıca teknik borcun üç maddesi kapandı: indirme listesi oturumlar arası
 korunuyor (açılışta `.muiget` taraması), uzantıdan gelen başlıklar metaya

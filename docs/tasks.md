@@ -173,7 +173,10 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
       diye patlayabilir. İlk yeşil koşudan sonra birkaç çalıştırma izlenmeli;
       titrerse eşikler yavaş sunucunun parça aralığına göre büyütülmeli.
 - [x] `cargo clippy --all-targets` temiz (CI'a eklenmesi bekliyor)
-- [ ] Uygulama ikonu (şu an varsayılan Tauri ikonları kullanılıyor)
+- [x] Uygulama ikonu (`tools/ikon-uret.js` ile üretiliyor; harici görüntü
+      kütüphanesi yok, `npx tauri icon` platform boyutlarını türetiyor)
+- [x] GitHub Pages tanıtım sayfası (`site/`, `gh-pages` dalına yayınlanıyor)
+- [x] Yayın iş akışı (`v*` etiketi → Windows kurulum paketleri → GitHub Release)
 
 ## Sıradaki (Şu Anki Öncelik)
 
