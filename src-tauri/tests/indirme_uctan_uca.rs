@@ -733,3 +733,51 @@ async fn uzantidan_gelen_dosya_adi_sunucununkini_eziyor() {
     let yazilan = tokio::fs::read(&hedef).await.unwrap();
     assert!(yazilan == icerik);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn kategori_acikken_dosya_alt_klasore_iniyor() {
+    const BOYUT: usize = 128 * 1024;
+    let icerik = beklenen_icerik(BOYUT);
+    let sunucu = TestSunucusu::baslat(icerik.clone(), SunucuKipi::RangeDestekli).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let config = ManagerConfig { categorize: true, ..test_config(4) };
+    let manager = DownloadManager::new(config).unwrap();
+
+    let id = manager.start(sunucu.url("/film.mkv"), dir.path().to_path_buf()).unwrap();
+    let durum = tamamlanmayi_bekle(&manager, &id).await;
+    let snapshot = manager.get(&id).unwrap();
+    assert_eq!(durum, DownloadStatus::Completed, "hata: {:?}", snapshot.error);
+
+    let hedef = PathBuf::from(&snapshot.target_path);
+    assert_eq!(
+        hedef.parent().and_then(|p| p.file_name()).and_then(|a| a.to_str()),
+        Some("Video"),
+        "mkv dosyası Video klasörüne inmeliydi: {}",
+        hedef.display()
+    );
+
+    // Klasörleme dosyanın kendisini bozmamalı.
+    let yazilan = tokio::fs::read(&hedef).await.unwrap();
+    assert!(yazilan == icerik, "dosya içeriği bozuk");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn kategori_acikken_taninmayan_tur_kokte_kaliyor() {
+    const BOYUT: usize = 64 * 1024;
+    let sunucu = TestSunucusu::baslat(beklenen_icerik(BOYUT), SunucuKipi::RangeDestekli).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let config = ManagerConfig { categorize: true, ..test_config(2) };
+    let manager = DownloadManager::new(config).unwrap();
+
+    let id = manager.start(sunucu.url("/veri.xyzzy"), dir.path().to_path_buf()).unwrap();
+    let durum = tamamlanmayi_bekle(&manager, &id).await;
+    let snapshot = manager.get(&id).unwrap();
+    assert_eq!(durum, DownloadStatus::Completed, "hata: {:?}", snapshot.error);
+
+    // Tanınmayan tür için "Diğer" klasörü açmıyoruz: dosyayı bir kat daha
+    // derine gömmek, aramayı zorlaştırmaktan başka bir şey yapmazdı.
+    let hedef = PathBuf::from(&snapshot.target_path);
+    assert_eq!(hedef.parent(), Some(dir.path()), "kökte kalmalıydı: {}", hedef.display());
+}

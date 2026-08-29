@@ -71,11 +71,12 @@ muiget/
 │   ├── styles.css              ✅ Tasarım sistemi (Mui paleti, karar #10)
 │   ├── assets/fonts/           ✅ Outfit (gömülü, OFL-1.1)
 │   ├── components/             ✅ DownloadRow, AddDialog, SettingsDialog,
-│   │                              SpeedGraph, Toasts, Icons
+│   │                              SpeedGraph, Toasts, Icons, ContextMenu
 │   ├── hooks/                  ✅ useDownloads.ts (ilerleme yayınına abonelik),
 │   │                              useHotkeys.ts (klavye kısayolları)
 │   └── lib/                    ✅ api.ts (invoke sarmalayıcıları), types.ts,
-│                                  format.ts, notify.ts (OS bildirimi)
+│                                  format.ts, notify.ts (OS bildirimi),
+│                                  clipboard.ts (pano, yedek yollu)
 ├── src-tauri/                  ✅ Rust backend
 │   ├── Cargo.toml              ✅ crate: muiget, lib: muiget_lib
 │   ├── tauri.conf.json         ✅ identifier: com.muiget.app
@@ -89,13 +90,15 @@ muiget/
 │       ├── settings.rs         ✅ settings.json, normalize()
 │       ├── download/           ✅ Faz 1–2
 │       │   ├── mod.rs             # Hata tipleri
+│       │   ├── category.rs        # Uzantı → kategori klasörü (karar #18)
 │       │   ├── http.rs            # probe(): sunucu yetenekleri, dosya adı
 │       │   ├── segmenter.rs       # Range parçalarına bölme planı (saf)
 │       │   ├── writer.rs          # Sparse file, seek+write
 │       │   ├── resume.rs          # .muiget meta, tazelik kontrolü
 │       │   ├── worker.rs          # Segment task'ı, retry + backoff
 │       │   ├── speed.rs           # EWMA hız ölçümü
-│       │   ├── throttle.rs        # Token bucket, host kotası, zaman kuralları
+│       │   ├── throttle.rs        # Token bucket, host kotası + adil pay
+│       │   │                      #   (karar #17), zaman kuralları
 │       │   └── manager.rs         # Orkestrasyon + adaptif bölme
 │       ├── extension_bridge/   ✅ Faz 5
 │       │   ├── mod.rs             # İstek işleme, host kaydı
@@ -117,7 +120,7 @@ npm run dev       # sadece frontend (Vite, localhost:1420)
 npm run build     # tsc + vite build → dist/
 npm run tauri dev # tam uygulama (Rust + pencere)
 cargo check       # src-tauri/ içinde, hızlı Rust doğrulaması
-cargo test        # 134 birim + 13 uçtan uca test
+cargo test        # 143 birim + 15 uçtan uca test
 ```
 
 Uçtan uca testler (`src-tauri/tests/indirme_uctan_uca.rs`) elle yazılmış küçük
@@ -149,24 +152,37 @@ Detaylar için `docs/decisions.md`. Kısa özet:
 6. **Kuyruk**: eşzamanlı indirme sınırı yöneticide, tek bir `pump()`
    fonksiyonunda uygulanıyor. `start`/`resume` süpervizörü doğrudan
    başlatmıyor, isteği kuyruğa bırakıyor (karar #16).
-7. **Torrent**: librqbit `Session` API'si üzerinden magnet/`.torrent` desteği.
+7. **Host kotası adaleti**: kota (varsayılan 8 bağlantı) aynı sunucudaki
+   indirmelere bölüştürülüyor. Adalet izin dağıtımında değil segment planında:
+   her indirme yalnızca payı kadar segment açıyor. Bir indirme bitince pay
+   büyüyor ve adaptif bölme boşalan slotu değerlendiriyor (karar #17).
+8. **Kategori klasörleri**: uzantıya göre `Video`, `Müzik`, `Belgeler`…
+   Gömülü eşleme, varsayılan kapalı. Tarama (madde 5) bu klasörlere de
+   bakıyor, başkalarına değil (karar #18).
+9. **Torrent**: librqbit `Session` API'si üzerinden magnet/`.torrent` desteği.
    Sequential download modu (streaming izleme) ileride eklenecek.
 
 ## Çalışma Tarzı Notları
 
 - İlker doğrudan ve gayri resmi iletişim kuruyor, hızlı aksiyon tercih ediyor.
-- Uzun açıklamadan çok somut adım/kod istiyor — ama bu doküman aşamasında
-  sadece MD dosyaları isteniyor, kod yazımı bilinçli olarak erteleniyor.
+- Uzun açıklamadan çok somut adım/kod istiyor. "Bir sürü şey yap" dediğinde
+  beklenen küçük bir düzeltme değil, bitmiş ve testli birkaç iş.
+- Öncelik ölçütü: **IDM ile arayı kapatmak**. Bir özelliğin "IDM'de var mı"
+  sorusu, iç güzellikten önce geliyor.
 - Her yeni oturumda önce `docs/worklog.md`'nin son girdisini, sonra
   `docs/tasks.md`'nin "Sıradaki" bölümünü oku.
 
 ## Sıradaki Adım
 
 **Faz 0, 1, 2, 3 ve 5 tamamlandı.** Çalışan bir segmentli indirme motoru, tam
-bir arayüz ve Chrome uzantısı var. 147 test geçiyor. Uygulama gerçek
+bir arayüz ve Chrome uzantısı var. 158 test geçiyor. Uygulama gerçek
 penceresinde uçtan uca doğrulandı (8 MB dosya, 8 paralel segment, SHA-256
 birebir aynı). Chrome köprüsü de Chrome'un gerçek çağrısıyla doğrulandı;
-son yayın v0.1.1.
+son yayın v0.1.2.
+
+IDM'e yaklaştıran son eklemeler: host kotasının indirmeler arasında adil
+bölüşülmesi (karar #17), kategori klasörleri (karar #18), satır sağ tık
+menüsü, sürükle-bırakla bağlantı ekleme ve toplu ekleme.
 
 Ayrıca teknik borcun üç maddesi kapandı: indirme listesi oturumlar arası
 korunuyor (açılışta `.muiget` taraması), uzantıdan gelen başlıklar metaya

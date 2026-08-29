@@ -327,6 +327,26 @@ export function SettingsDialog({ settings, onClose, onSave, onSaveQuiet, onResca
             />
           </div>
 
+          <div className="field row">
+            <span>
+              Dosyaları türüne göre klasörle
+              <br />
+              <span className="field-hint">
+                İnen dosya <code>Video</code>, <code>Müzik</code>, <code>Belgeler</code>,{' '}
+                <code>Arşivler</code>, <code>Programlar</code>, <code>Resimler</code>{' '}
+                alt klasörlerine ayrılır. Tanınmayan türler klasörün kökünde kalır.
+                Sürmekte olan indirmeler taşınmaz.
+              </span>
+            </span>
+            <button
+              className="switch"
+              role="switch"
+              aria-checked={taslak.engine.categorize}
+              aria-label="Dosyaları türüne göre klasörle"
+              onClick={() => motoruGuncelle({ categorize: !taslak.engine.categorize })}
+            />
+          </div>
+
           {/* ---- Hız ---- */}
           <h3 className="section-title">Hız sınırı</h3>
 

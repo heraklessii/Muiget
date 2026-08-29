@@ -63,13 +63,11 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
 - [x] Aynı host'a açılan toplam bağlantı sayısını sınırlama (semafor)
 - [ ] Segment sayısını indirme sürerken dinamik artırma/azaltma (tam adaptif
       algoritma — ilk sürüm yalnızca boşalan slotu değerlendiriyor)
-- [ ] **Host kotası indirmeler arasında paylaştırılmıyor.** Aynı siteden üç
-      indirme başlatılınca ilki 8 bağlantının hepsini alıyor, diğer ikisi
-      sıfır byte'ta bekliyor ve ancak ilki bitince başlıyorlar. Sonuç doğru
-      (kota aşılmıyor) ve indirmeler kaybolmuyor, ama sıra tamamen rastlantısal.
-      Arayüz şimdilik dürüst davranıp "Bağlantı bekleniyor" yazıyor; asıl çözüm
-      kotayı aktif indirmelere bölüştürmek. Gerçek uygulamada üç eşzamanlı
-      indirmeyle görüldü.
+- [x] **Host kotası indirmeler arasında paylaştırılıyor** (karar #17).
+      `HostLimiter` host başına indirme sayısını tutuyor, süpervizör segment
+      planını `fair_share()` ile sınırlıyor. Üç indirme × 2 segment = 6
+      bağlantı; kimse sıfır byte'ta beklemiyor. Bir indirme bitince pay
+      büyüyor ve adaptif bölme boşalan slotu kendiliğinden değerlendiriyor.
 
 ## Faz 3 — Tauri UI (React/Vite) ✅
 
@@ -94,8 +92,20 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
 - [x] İndirme listesinde arama (dosya adı + adres, Türkçe duyarlı) ve sıralama
       (eklenme/ad/boyut/ilerleme)
 - [x] Toplu eylem: tümünü duraklat / tümünü sürdür (motorda tek geçişte)
-- [ ] Sürükle-bırak ile bağlantı ekleme (tarayıcıdan sürüklenen linki yakalamak)
-- [ ] Liste satırında sağ tık menüsü (kopyala, yeniden indir, klasörde göster)
+- [x] Sürükle-bırak ile bağlantı ekleme. Tauri'nin dosya-bırakma yakalayıcısı
+      kapatıldı (`dragDropEnabled: false`), yoksa webview HTML5 olaylarını hiç
+      görmüyordu. Bırakılan adres doğrudan indirilmiyor, yeni indirme kutusunu
+      dolduruyor.
+- [x] Liste satırında sağ tık menüsü: bağlantıyı/dosya adını kopyala,
+      duraklat/devam, klasörde göster, yeniden indir, listeden kaldır.
+      Menü duruma göre kısalıyor.
+- [x] Toplu bağlantı ekleme: kutuya birden çok adres yapıştırılınca hepsi
+      kuyruğa alınıyor (tek yenileme turu). Toplu ekleme sunucu yoklamasını
+      atlıyor.
+- [x] **Kategori klasörleri** (karar #18): inen dosya türüne göre `Video`,
+      `Müzik`, `Belgeler`, `Arşivler`, `Programlar`, `Resimler` alt
+      klasörlerine ayrılıyor. Varsayılan kapalı; `.muiget` taraması bu
+      klasörlere de bakıyor.
 
 ## Faz 4 — Torrent Entegrasyonu
 
@@ -179,11 +189,15 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
 - [x] Yayın iş akışı (`v*` etiketi → Windows kurulum paketleri → GitHub Release)
 - [x] v0.1.0 ön sürümü yayınlandı (elle; iş akışı depo izin ayarı yüzünden
       düşmüştü, ayar düzeltildi)
-- [ ] **Yayın iş akışının sürüm oluşturma adımı sahada sınanmadı.** İlk
-      koşuşta derleme geçti ama `create-release` 403 aldı; depo ayarı
-      (`default_workflow_permissions`) `write` yapıldı. Bir sonraki `v*`
-      etiketinde uçtan uca çalıştığı doğrulanmalı — çalışmazsa v0.1.0'daki
-      gibi elle yayınlama yolu duruyor.
+- [x] **Yayın iş akışı uçtan uca sınandı.** `v0.1.1` etiketiyle iş akışı
+      derleyip GitHub Release'ini kendisi oluşturdu ve iki kurulum paketini
+      yükledi. İzin sorunu (`default_workflow_permissions`) çözülmüş durumda.
+- [ ] **CI paketi ile yerel derlemenin SHA-256'sı tutmuyor** — beklenen.
+      v0.1.0'da tutmasının sebebi paketin elle yüklenen yerel derleme
+      olmasıydı. Rust/NSIS yeniden üretilebilir çıktı vermiyor (gömülü yollar,
+      zaman damgaları). Gerçekten doğrulanabilir yayın isteniyorsa yol
+      `cargo auditable` + yeniden üretilebilir derleme ayarları; şimdilik
+      yalnızca not.
 
 ## Sıradaki (Şu Anki Öncelik)
 
@@ -195,10 +209,16 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
      uçtan uca doğrulandı (8. oturum: `accepted` yanıtı, 2 MB indirme, SHA-256
      birebir) ve host kaydı yazıldı. Kalan tek adım Chrome'da
      **Paketlenmemiş öğe yükle** — otomatikleştirilemiyor.
-   - Köprü, uygulamayı `--add` ile başlatırken stdout'u miras bırakıyor.
-     Chrome'un yanıtı beklemeden dispatch ettiği varsayılıyor; popup takılırsa
-     çocuk sürece `Stdio::null()` verilmeli.
+   - Sürükle-bırak ve toplu ekleme gerçek pencerede denenmedi. Arayüz tarayıcı
+     panelinde (koyu + açık tema) doğrulandı, ama HTML5 bırakma olayının Tauri
+     webview'inde davranışı yalnızca gerçek pencerede görülür.
 2. **Faz 4 (torrent)** — en büyük yeni yüzey; yukarıdaki bitmeden
    başlanmamalı.
-3. **Kalan arayüz işleri** — sürükle-bırak ile bağlantı ekleme ve satır sağ tık
-   menüsü (Faz 3'ün işaretsiz maddeleri). Küçük ve bağımsız; arada yapılabilir.
+3. **Motor derinliği** — IDM ile arayı kapatan asıl işler:
+   - Segment sayısını indirme sürerken dinamik artırma/azaltma (Faz 2'nin açık
+     maddesi). Pay mekanizması (karar #17) artık üst sınırı biliyor; eksik olan
+     hızı ölçüp aşağı inmek.
+   - İndirilen dosya için checksum gösterimi (Faz 6).
+   - Pano izleme: kopyalanan bağlantıyı yakalayıp indirme önerme. IDM'in en çok
+     kullanılan davranışlarından biri; Rust tarafında pano okuyan bir bağımlılık
+     gerektiriyor.

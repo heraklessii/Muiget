@@ -1176,3 +1176,115 @@ svg {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------- Bağlam menüsü (satır sağ tık) ---------- */
+
+.context-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 208px;
+  padding: var(--space-1);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  display: flex;
+  flex-direction: column;
+  animation: rise var(--t-fast) var(--ease);
+}
+
+.context-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.context-menu__item:hover,
+.context-menu__item:focus-visible {
+  background: var(--bg-elevated);
+}
+
+.context-menu__item.danger {
+  color: var(--error);
+}
+
+/* Ayırıcı, maddenin kendi üst kenarı: ayrı bir <hr> elemanı hem erişilebilirlik
+   ağacına gereksiz düğüm ekler hem de klavye gezinmesini bölerdi. */
+.context-menu__item.separated {
+  margin-top: var(--space-1);
+  border-top: 1px solid var(--border);
+  padding-top: calc(var(--space-2) + var(--space-1));
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.context-menu__icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.context-menu__icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.context-menu__item.danger .context-menu__icon {
+  color: var(--error);
+}
+
+/* ---------- Sürükle-bırak kaplaması ---------- */
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 45%);
+  backdrop-filter: blur(2px);
+  animation: fade-in var(--t-fast) var(--ease);
+  /* Kaplama fareyi yutmamalı: yutarsa üstünde `drop` olayı tetiklenmez ve
+     bırakma hiç gerçekleşmezdi. */
+  pointer-events: none;
+}
+
+.drop-overlay__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6) calc(var(--space-6) * 1.5);
+  background: var(--bg-panel);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+  text-align: center;
+}
+
+.drop-overlay__card svg {
+  width: 32px;
+  height: 32px;
+  color: var(--accent);
+}
+
+.drop-overlay__card strong {
+  font-size: 1.05rem;
+}
+
+.drop-overlay__card span {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}

@@ -1,17 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AddDialog } from './components/AddDialog';
+import { ContextMenu, type MenuItem } from './components/ContextMenu';
 import { DownloadRow } from './components/DownloadRow';
 import {
   IconClose,
+  IconCopy,
   IconDownload,
+  IconFolder,
+  IconLink,
   IconMoon,
   IconPause,
   IconPlay,
   IconPlus,
+  IconRefresh,
   IconSearch,
   IconSettings,
   IconSun,
+  IconTrash,
 } from './components/Icons';
 import { SettingsDialog } from './components/SettingsDialog';
 import { SpeedGraph } from './components/SpeedGraph';
@@ -19,6 +25,7 @@ import { Toasts, useToasts } from './components/Toasts';
 import { useDownloads } from './hooks/useDownloads';
 import { useHotkeys } from './hooks/useHotkeys';
 import * as api from './lib/api';
+import { copyText } from './lib/clipboard';
 import { formatBytes, formatSpeed } from './lib/format';
 import { osBildirimi } from './lib/notify';
 import {
@@ -59,6 +66,12 @@ export default function App() {
   const [addAcik, setAddAcik] = useState(false);
   const [ayarlarAcik, setAyarlarAcik] = useState(false);
   const [hizSiniri, setHizSiniri] = useState(0);
+
+  /** Sağ tık menüsü: imleç konumu + hangi indirmeye ait olduğu. */
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  /** Pencereye bırakılan adres — yeni indirme kutusunu dolu açıyor. */
+  const [birakilanUrl, setBirakilanUrl] = useState<string | null>(null);
+  const [surukleniyor, setSurukleniyor] = useState(false);
 
   const aramaRef = useRef<HTMLInputElement>(null);
   const diyalogAcik = addAcik || ayarlarAcik;
@@ -177,6 +190,39 @@ export default function App() {
     [refresh, sarmala],
   );
 
+  /**
+   * Toplu ekleme: hepsini başlat, sonra **bir kez** yenile.
+   *
+   * Adres başına ayrı yenileme on bağlantıda on tur demek olurdu. Bir adres
+   * hata verirse diğerleri yine de başlıyor — biri yüzünden hepsini iptal
+   * etmek, kullanıcının listeyi baştan yapıştırması demek olurdu. Sonuç tek
+   * bildirimde özetleniyor; on ayrı hata toast'ı kimseye yardım etmez.
+   */
+  const baslaCoklu = useCallback(
+    async (urls: string[], directory: string) => {
+      let basarili = 0;
+      const hatalar: string[] = [];
+
+      for (const adres of urls) {
+        try {
+          await api.startDownload(adres, directory);
+          basarili += 1;
+        } catch (e) {
+          hatalar.push(api.errorMessage(e));
+        }
+      }
+
+      await refresh();
+      setAddAcik(false);
+
+      if (basarili > 0) push('info', `${basarili} indirme kuyruğa alındı`);
+      if (hatalar.length > 0) {
+        push('error', `${hatalar.length} bağlantı başlatılamadı — ilki: ${hatalar[0]}`);
+      }
+    },
+    [push, refresh],
+  );
+
   const duraklat = useCallback(
     (id: string) => void sarmala(() => api.pauseDownload(id), 'Duraklatılamadı'),
     [sarmala],
@@ -211,6 +257,93 @@ export default function App() {
     (path: string) => void sarmala(() => api.revealInFolder(path), 'Klasör açılamadı'),
     [sarmala],
   );
+
+  /**
+   * Aynı adresi baştan indirir.
+   *
+   * Klasör bilerek verilmiyor: hedef yol satırda duruyor ama ondan klasör
+   * ayıklamak platforma göre ayırıcı tahmin etmek demek. Varsayılan indirme
+   * klasörü hem doğru hem öngörülebilir; dosya adı çakışırsa motor zaten
+   * benzersizleştiriyor.
+   */
+  const yenidenIndir = useCallback(
+    (url: string) =>
+      void sarmala(async () => {
+        await api.startDownload(url);
+        await refresh();
+      }, 'Yeniden indirilemedi'),
+    [refresh, sarmala],
+  );
+
+  const kopyala = useCallback(
+    (metin: string, ne: string) => {
+      void copyText(metin).then((oldu) =>
+        push(oldu ? 'info' : 'error', oldu ? `${ne} kopyalandı` : `${ne} kopyalanamadı`),
+      );
+    },
+    [push],
+  );
+
+  /**
+   * Sürükle-bırak ile bağlantı ekleme.
+   *
+   * Tauri'nin kendi dosya-bırakma yakalayıcısı kapatıldı
+   * (`tauri.conf.json` → `dragDropEnabled: false`); açıkken webview HTML5
+   * sürükleme olaylarını hiç görmüyor. Bize gereken dosya değil **adres**:
+   * tarayıcıdan sürüklenen bağlantı `text/uri-list` olarak geliyor.
+   *
+   * Bırakılan adres doğrudan indirilmiyor, yeni indirme kutusunu dolduruyor:
+   * yanlışlıkla bırakılan bir bağlantının sessizce indirmeye başlaması
+   * kullanıcının istemediği bir yan etki olurdu.
+   */
+  useEffect(() => {
+    const uzerinde = (e: DragEvent) => {
+      if (!e.dataTransfer) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setSurukleniyor(true);
+    };
+
+    // `relatedTarget` boşsa imleç pencereden gerçekten çıktı; iç elemanlar
+    // arasında gezinirken de `dragleave` tetikleniyor ve kaplama titrerdi.
+    const ayrildi = (e: DragEvent) => {
+      if (!e.relatedTarget) setSurukleniyor(false);
+    };
+
+    const birakildi = (e: DragEvent) => {
+      e.preventDefault();
+      setSurukleniyor(false);
+
+      const ham =
+        e.dataTransfer?.getData('text/uri-list') ||
+        e.dataTransfer?.getData('text/plain') ||
+        '';
+
+      // `text/uri-list` çok satırlı olabiliyor ve `#` ile başlayan satırlar yorum.
+      const adres = ham
+        .split(/\r?\n/)
+        .map((satir) => satir.trim())
+        .find((satir) => /^https?:\/\/\S+$/i.test(satir));
+
+      if (!adres) {
+        push('error', 'Bırakılan şey bir web adresi değil');
+        return;
+      }
+
+      setBirakilanUrl(adres);
+      setAddAcik(true);
+    };
+
+    window.addEventListener('dragover', uzerinde);
+    window.addEventListener('dragleave', ayrildi);
+    window.addEventListener('drop', birakildi);
+
+    return () => {
+      window.removeEventListener('dragover', uzerinde);
+      window.removeEventListener('dragleave', ayrildi);
+      window.removeEventListener('drop', birakildi);
+    };
+  }, [push]);
 
   // Toplu eylemler motorda tek geçişte yapılıyor: arayüzün tek tek çağırması
   // hem N tur demek olurdu hem de araya biten bir indirme girdiğinde kuyruktan
@@ -346,6 +479,77 @@ export default function App() {
     () => downloads.some((d) => isResumable(d.status)),
     [downloads],
   );
+
+  /**
+   * Sağ tık menüsünün içeriği.
+   *
+   * Menü duruma göre kısalıyor: tamamlanmış bir indirmede "Duraklat",
+   * inen bir indirmede "Klasörde göster" anlamsız. Sönük ama duran maddeler
+   * yerine hiç göstermemek, menüyü her durumda kısa ve okunur tutuyor.
+   */
+  const menuOgeleri = useMemo<MenuItem[]>(() => {
+    if (!menu) return [];
+    const indirme = downloads.find((d) => d.id === menu.id);
+    if (!indirme) return [];
+
+    const ogeler: MenuItem[] = [
+      {
+        label: 'Bağlantıyı kopyala',
+        icon: <IconLink />,
+        onSelect: () => kopyala(indirme.url, 'Bağlantı'),
+      },
+      {
+        label: 'Dosya adını kopyala',
+        icon: <IconCopy />,
+        onSelect: () => kopyala(indirme.fileName, 'Dosya adı'),
+      },
+    ];
+
+    if (isActive(indirme.status)) {
+      ogeler.push({
+        label: 'Duraklat',
+        icon: <IconPause />,
+        separated: true,
+        onSelect: () => duraklat(indirme.id),
+      });
+    }
+
+    if (isResumable(indirme.status)) {
+      ogeler.push({
+        label: 'Devam et',
+        icon: <IconPlay />,
+        separated: true,
+        onSelect: () => devamEt(indirme.id),
+      });
+    }
+
+    if (indirme.status === 'completed') {
+      ogeler.push({
+        label: 'Klasörde göster',
+        icon: <IconFolder />,
+        separated: true,
+        onSelect: () => klasordeGoster(indirme.targetPath),
+      });
+    }
+
+    if (['completed', 'failed', 'cancelled'].includes(indirme.status)) {
+      ogeler.push({
+        label: 'Yeniden indir',
+        icon: <IconRefresh />,
+        onSelect: () => yenidenIndir(indirme.url),
+      });
+    }
+
+    ogeler.push({
+      label: 'Listeden kaldır',
+      icon: <IconTrash />,
+      danger: true,
+      separated: true,
+      onSelect: () => kaldir(indirme.id),
+    });
+
+    return ogeler;
+  }, [menu, downloads, kopyala, duraklat, devamEt, klasordeGoster, yenidenIndir, kaldir]);
 
   return (
     <div className="shell">
@@ -499,6 +703,10 @@ export default function App() {
                 onCancel={iptalEt}
                 onRemove={kaldir}
                 onReveal={klasordeGoster}
+                onContextMenu={(e, id) => {
+                  e.preventDefault();
+                  setMenu({ x: e.clientX, y: e.clientY, id });
+                }}
               />
             ))}
           </div>
@@ -536,10 +744,37 @@ export default function App() {
 
       {addAcik && settings && (
         <AddDialog
+          // Diyalog açıkken ikinci bir bağlantı bırakılırsa kutu yeni adresle
+          // yeniden kurulsun diye anahtar adrese bağlı.
+          key={birakilanUrl ?? 'bos'}
           defaultDirectory={settings.downloadDir}
-          onClose={() => setAddAcik(false)}
+          initialUrl={birakilanUrl ?? undefined}
+          onClose={() => {
+            setAddAcik(false);
+            setBirakilanUrl(null);
+          }}
           onStart={basla}
+          onStartMany={baslaCoklu}
         />
+      )}
+
+      {menu && menuOgeleri.length > 0 && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuOgeleri}
+          onClose={() => setMenu(null)}
+        />
+      )}
+
+      {surukleniyor && (
+        <div className="drop-overlay" aria-hidden>
+          <div className="drop-overlay__card">
+            <IconLink />
+            <strong>Bağlantıyı bırak</strong>
+            <span>Adres yeni indirme kutusuna düşecek</span>
+          </div>
+        </div>
       )}
 
       {ayarlarAcik && settings && (

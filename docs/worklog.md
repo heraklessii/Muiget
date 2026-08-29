@@ -7,7 +7,7 @@ Format: Tarih, yapılanlar, kararlar, sıradaki adım.
 
 ---
 
-## 2026-08-30 (8. oturum) — Chrome Köprüsü Sahada Denendi, Kip Tetikleyicisi Düzeltildi
+## 2026-08-30 (8. oturum) — Köprü Düzeltmesi, v0.1.1 Yayını, Kota Adaleti, IDM Özellikleri
 
 İlker "uzantıyı nasıl kurup test ederim" diye sordu. Kuruluma başlamadan önce,
 köprünün Chrome'un gerçekte kullandığı çağrıyla çalışmadığı ortaya çıktı.
@@ -51,16 +51,84 @@ baytlarının SHA-256'sı, ilk 16 bayt, hex haneleri `a-p`'ye eşlenerek:
 Chrome'da **Paketlenmemiş öğe yükle** — bir Windows dosya seçme penceresi,
 otomatikleştirilemiyor. Zincirin Chrome'a değen son halkası hâlâ denenmedi.
 
-### Açık risk
+### Testte görülen risk
 
-Köprü, uygulamayı `--add` ile başlatırken stdout'u miras bırakıyor. Testte
-borunun EOF'u uygulama kapanana kadar gelmedi. Chrome yanıtı hemen okuyup
-host'u sonlandırdığı için sorun çıkarmaması gerekiyor; popup takılırsa ilk
-bakılacak yer burası. Çözümü kısa: çocuk sürece `Stdio::null()` vermek.
+Köprü, uygulamayı `--add` ile başlatırken stdout'u miras bırakıyordu ve
+borunun EOF'u uygulama kapanana kadar gelmedi. Aynı oturumda kapatıldı —
+aşağıdaki "Köprüdeki açık risk kapatıldı" bölümüne bakın.
+
+
+### v0.1.1 yayınlandı — iş akışı ilk kez uçtan uca çalıştı
+
+Sürüm numarası beş dosyada 0.1.1'e çekildi, `v0.1.1` etiketi itildi ve
+`release.yml` bu kez **kendisi** derleyip GitHub Release'ini oluşturdu, iki
+kurulum paketini yükledi. v0.1.0'da bu adım izin sorunundan düşmüş ve paket
+elle yüklenmişti; o madde artık kapandı.
+
+Kurulu sürüm (`%LOCALAPPDATA%\Muiget`) 0.1.1'e güncellendi ve köprü kaydı debug
+binary yerine kurulu exe'ye yönlendirildi.
+
+**Beklenen ama not edilmesi gereken:** CI'ın ürettiği paketin SHA-256'sı yerel
+derlemeyle **tutmuyor**. v0.1.0'da tutmasının sebebi paketin elle yüklenen
+yerel derleme olmasıydı; CI bağımsız derleyince Rust/NSIS yeniden üretilebilir
+çıktı vermiyor. Doğrulanabilir yayın ayrı bir iş.
+
+### Host kotası artık indirmeler arasında bölüşülüyor (karar #17)
+
+Teknik borcun en görünür maddesi kapandı. Aynı siteden üç indirme başlatılınca
+ilki sekiz iznin hepsini alıyor, diğer ikisi sıfır byte'ta bekliyordu.
+
+Sebep: izin **segment ömrü boyunca** tutuluyor ve segmentler birlikte bitiyor.
+Çözüm izin dağıtımında değil planda: `HostLimiter` host başına indirme sayısını
+tutuyor (`register()` → RAII), `fair_share()` payı veriyor, süpervizör segment
+planını payla sınırlıyor. Üç indirme × 2 segment = 6 bağlantı.
+
+Rebalans ayrıca yazılmadı: bir indirme bitince kaydı düşüyor, pay büyüyor ve
+adaptif bölme (karar #5) boşalan slotu zaten değerlendiriyor.
+
+### Kategori klasörleri (karar #18)
+
+IDM'in imza davranışı: inen dosya türüne göre `Video`, `Müzik`, `Belgeler`,
+`Arşivler`, `Programlar`, `Resimler` alt klasörlerine ayrılıyor. Eşleme koda
+gömülü, ayarlardan tek anahtarla açılıyor, **varsayılan kapalı** — bir sürüm
+yükseltmesinin dosyaların nereye düştüğünü sessizce değiştirmesi doğru olmazdı.
+
+Karar #15 ile etkileşimi atlanmadı: oturumlar arası liste `.muiget` taramasıyla
+geri geliyor ve tarama tek seviyeydi. Artık **yalnızca bilinen kategori
+klasörlerine** de bakıyor; serbest özyineleme hâlâ yok. İki testi var (kategori
+klasörü bulunuyor, rastgele alt klasöre inilmiyor).
+
+### Arayüz: sağ tık menüsü, sürükle-bırak, toplu ekleme
+
+- **Sağ tık menüsü** (`ContextMenu.tsx`): bağlantıyı/dosya adını kopyala,
+  duraklat/devam, klasörde göster, yeniden indir, listeden kaldır. Menü duruma
+  göre kısalıyor — sönük ama duran maddeler yerine hiç göstermemek.
+  Konum açıldıktan sonra ölçülüp pencereye sığdırılıyor.
+- **Sürükle-bırak**: `dragDropEnabled: false` yapıldı, yoksa Tauri'nin kendi
+  dosya-bırakma yakalayıcısı webview'in HTML5 olaylarını yutuyordu. Bırakılan
+  adres doğrudan indirilmiyor, yeni indirme kutusunu dolduruyor.
+- **Toplu ekleme**: kutuya birden çok adres yapıştırılınca hepsi kuyruğa
+  alınıyor, tek yenileme turuyla. Toplu ekleme yoklamayı atlıyor.
+
+Arayüz tarayıcı panelinde koyu ve açık temada doğrulandı. Gerçek pencerede
+denenmedi — sürüklemenin webview davranışı orada görülür.
+
+### Köprüdeki açık risk kapatıldı
+
+Köprü, uygulamayı `--add` ile başlatırken stdout'u miras bırakıyordu; artık
+`Stdio::null()`. Chrome'un okuduğu boru, uygulama penceresi yüzünden açık
+kalmıyor.
+
+### Sayılar
+
+158 test (143 birim + 15 uçtan uca), `cargo clippy --all-targets -D warnings`
+temiz, `npm run build` temiz.
 
 ### Sıradaki
 
-Chrome'la ilk gerçek deneme (İlker'in iki tıklaması), sonra Faz 4 (torrent).
+Chrome'la ilk gerçek deneme (İlker'in iki tıklaması) ve yeni arayüz
+özelliklerinin gerçek pencerede denenmesi. Sonra Faz 4 (torrent) ya da motor
+derinliği (dinamik segment sayısı, checksum, pano izleme) — bkz. `tasks.md`.
 
 ---
 

@@ -8,7 +8,7 @@ anahtarı satın alması gerekmeyen, kodunu herkesin okuyup değiştirebildiği 
 [![Status](https://img.shields.io/badge/durum-geli%C5%9Ftirme%20a%C5%9Famas%C4%B1nda-orange.svg)](docs/tasks.md)
 
 > ⚠️ **Bu proje erken geliştirme aşamasında.** İndirme motoru, arayüz ve Chrome
-> uzantısı çalışıyor (147 test geçiyor) ama uygulama geniş çapta sahada
+> uzantısı çalışıyor (158 test geçiyor) ama uygulama geniş çapta sahada
 > denenmedi ve torrent desteği henüz eklenmedi. İlerlemeyi
 > [`docs/tasks.md`](docs/tasks.md) üzerinden takip edebilirsiniz.
 
@@ -26,11 +26,19 @@ anahtarı satın alması gerekmeyen, kodunu herkesin okuyup değiştirebildiği 
 - **Kuyruk** — Aynı anda kaç indirmenin çalışacağını siz belirlersiniz
   (varsayılan 3); fazlası sıraya girer. Hepsini birden başlatmak toplam süreyi
   kısaltmaz, yalnızca ilk dosyanın bitişini geciktirir.
-- **Yolunuzdan çekilen arayüz** — Listede arama ve sıralama, tümünü duraklat /
-  sürdür, klavye kısayolları (Ctrl+N yeni indirme, Ctrl+F arama, Ctrl+, ayarlar)
-  ve pencere kapalıyken işletim sistemi bildirimi.
+- **Yolunuzdan çekilen arayüz** — Listede arama ve sıralama, satır sağ tık
+  menüsü, sürükle-bırakla bağlantı ekleme, tümünü duraklat / sürdür, klavye
+  kısayolları (Ctrl+N yeni indirme, Ctrl+F arama, Ctrl+, ayarlar) ve pencere
+  kapalıyken işletim sistemi bildirimi.
+- **Toplu ekleme** — Kutuya birden çok adresi bir arada yapıştırın, hepsi
+  kuyruğa girsin.
+- **Kategori klasörleri** — İnen dosya türüne göre `Video`, `Müzik`,
+  `Belgeler`, `Arşivler`, `Programlar`, `Resimler` alt klasörlerine ayrılır.
+  Varsayılan kapalı; ayarlardan tek anahtarla açılır.
 - **Adaptif** — Bir parça bitince en yavaş parçanın kalanı ikiye bölünüp
   devralınır; hız sınırı ve saat bazlı kurallar (gece sınırsız, gündüz 2 MB/s).
+  Aynı siteden birden çok indirme varsa bağlantı kotası aralarında adil
+  bölüşülür — hiçbiri sıfır byte'ta beklemez.
 - **Tarayıcı entegrasyonu** — Chrome uzantısı ile sağ tık → "Muiget ile indir",
   sayfa taraması ve isteğe bağlı indirme devralma
   ([kurulum](extension/README.md)).

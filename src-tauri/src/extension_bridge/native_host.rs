@@ -279,9 +279,19 @@ fn handle_message(message: ExtensionMessage) -> HostResponse {
         Ok(istek) => {
             match std::env::current_exe() {
                 Ok(exe) => {
+                    // Borular çocuğa miras bırakılmıyor.
+                    //
+                    // Miras kalsaydı uygulama penceresi, Chrome'un okuduğu
+                    // stdout borusunu açık tutardı: köprü çıktıktan sonra bile
+                    // boru kapanmaz, EOF gelmezdi. Chrome yanıtı beklemeden
+                    // dağıttığı için pratikte çalışıyordu ama bu, gözlenmiş bir
+                    // davranışa yaslanmak olurdu — kesmek bir satır.
                     let sonuc = std::process::Command::new(exe)
                         .arg(ADD_FLAG)
                         .arg(encode_payload(&istek))
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
                         .spawn();
 
                     match sonuc {

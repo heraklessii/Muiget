@@ -27,7 +27,8 @@ use super::http::{self, ServerCapabilities};
 use super::resume::{Freshness, ResumeMeta};
 use super::segmenter::{self, Segment};
 use super::speed::{eta_seconds, SpeedMeter};
-use super::throttle::{BandwidthRule, HostLimiter, RateLimiter};
+use super::category;
+use super::throttle::{self, BandwidthRule, HostLimiter, RateLimiter};
 use super::worker::{self, SegmentContext, WorkerConfig, WorkerEvent};
 use super::writer;
 use super::{DownloadError, Result};
@@ -127,6 +128,14 @@ pub struct ManagerConfig {
     #[serde(default = "varsayilan_es_zamanli")]
     pub max_concurrent_downloads: usize,
     pub global_speed_limit: u64,
+    /// İnen dosyayı türüne göre alt klasöre koy (`Video`, `Müzik`, …).
+    ///
+    /// Varsayılan kapalı: indirmenin nereye düştüğünü sürüm yükseltmesiyle
+    /// sessizce değiştirmek, kullanıcıya dosyasını kaybettirmek gibi gelirdi.
+    /// `serde(default)` eski `settings.json` dosyaları için — alan yoksa
+    /// kapalı sayılıyor.
+    #[serde(default)]
+    pub categorize: bool,
     pub bandwidth_rules: Vec<BandwidthRule>,
     pub user_agent: String,
     pub connect_timeout_secs: u64,
@@ -144,6 +153,7 @@ impl Default for ManagerConfig {
             max_connections_per_host: 8,
             max_concurrent_downloads: varsayilan_es_zamanli(),
             global_speed_limit: 0,
+            categorize: false,
             bandwidth_rules: Vec::new(),
             user_agent: http::DEFAULT_USER_AGENT.to_string(),
             connect_timeout_secs: 15,
@@ -839,7 +849,23 @@ impl DownloadManager {
         self.emit(&entry);
 
         let client = self.inner.client.read().unwrap().clone();
-        let config = self.config();
+        let mut config = self.config();
+
+        // Host kotasını indirmeler arasında bölüştür.
+        //
+        // Kota tek başına yetmiyordu: aynı sunucudan üç indirme başlatılınca
+        // ilki sekiz iznin hepsini alıyor, diğer ikisi ilk indirme bitene
+        // kadar sıfır byte'ta bekliyordu. İzin segment boyunca tutulduğu için
+        // sıra hiç dönmüyordu. Çözüm izin dağıtımında değil planda: her
+        // indirme yalnızca payı kadar segment açıyor.
+        //
+        // Kayıt süpervizör yaşadığı sürece duruyor. İndirme bitince ya da
+        // duraklayınca düşüyor ve kalanların payı büyüyor — bu büyümeyi
+        // adaptif bölme (`try_steal`) kendiliğinden değerlendiriyor.
+        let hosts = self.inner.hosts.read().unwrap().clone();
+        let host = throttle::host_of(&entry.url);
+        let _host_kaydi = hosts.register(&host);
+        config.segments = config.segments.min(hosts.fair_share(&host));
 
         // --- 1. Sunucuyu yokla ---
         let caps = tokio::select! {
@@ -866,7 +892,11 @@ impl DownloadManager {
         let target = {
             let mevcut = entry.state.lock().unwrap().target.clone();
             if fresh {
-                benzersiz_yol(&directory, &dosya_adi, &entry.url).await
+                // Kategori klasörü yalnızca yeni indirmelerde uygulanıyor:
+                // devam eden bir indirmenin yolu metada yazılı ve dosyayı
+                // oraya taşımak resume'u bozardı.
+                let klasor = kategori_klasoru(&directory, &dosya_adi, config.categorize).await;
+                benzersiz_yol(&klasor, &dosya_adi, &entry.url).await
             } else {
                 mevcut
             }
@@ -1207,6 +1237,14 @@ impl DownloadManager {
             return None;
         }
 
+        // Aynı sunucudan başka indirmeler varsa büyümek onların izinlerini
+        // yer. Pay dolduysa bölme yok; pay büyüdüyse (bir indirme bitti)
+        // burası kendiliğinden yeniden büyümeye izin veriyor.
+        let pay = self.inner.hosts.read().unwrap().fair_share(&throttle::host_of(&entry.url));
+        if state.segments.iter().filter(|s| !s.finished).count() >= pay {
+            return None;
+        }
+
         let kurban = state
             .segments
             .iter()
@@ -1284,6 +1322,31 @@ impl DownloadManager {
         }
         self.emit(entry);
         Ok(())
+    }
+}
+
+/// Kategori açıksa dosya türüne göre alt klasör, değilse verilen klasörün
+/// kendisi.
+///
+/// Klasör burada oluşturuluyor: [`benzersiz_yol`] var olmayan bir klasörde
+/// çakışma arayamaz. Oluşturma başarısız olursa köke düşülüyor — kategori bir
+/// kolaylık; onun yüzünden indirmenin hiç başlamaması orantısız olurdu.
+async fn kategori_klasoru(kok: &Path, dosya_adi: &str, acik: bool) -> PathBuf {
+    if !acik {
+        return kok.to_path_buf();
+    }
+
+    let Some(ad) = category::folder_for(dosya_adi) else {
+        return kok.to_path_buf();
+    };
+
+    let hedef = kok.join(ad);
+    match tokio::fs::create_dir_all(&hedef).await {
+        Ok(()) => hedef,
+        Err(e) => {
+            log::warn!("kategori klasörü oluşturulamadı ({}): {e}", hedef.display());
+            kok.to_path_buf()
+        }
     }
 }
 

@@ -1,7 +1,7 @@
 /**
  * Satır içi SVG ikonlar.
  *
- * İkon kütüphanesi yerine elle yazıldı: uygulamanın ihtiyacı sekiz ikon ve
+ * İkon kütüphanesi yerine elle yazıldı: uygulamanın ihtiyacı bir avuç ikon ve
  * bunun için birkaç yüz kilobaytlık bir paket bağımlılığı taşımak — hele
  * çevrimdışı çalışması gereken bir uygulamada — orantısız.
  *
@@ -129,6 +129,33 @@ export function IconClose({ className }: IconProps) {
   return (
     <svg {...ortak} className={className}>
       <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  );
+}
+
+export function IconCopy({ className }: IconProps) {
+  return (
+    <svg {...ortak} className={className}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+    </svg>
+  );
+}
+
+export function IconRefresh({ className }: IconProps) {
+  return (
+    <svg {...ortak} className={className}>
+      <path d="M20 12a8 8 0 1 1-2.3-5.6" />
+      <path d="M20 4v5h-5" />
+    </svg>
+  );
+}
+
+export function IconLink({ className }: IconProps) {
+  return (
+    <svg {...ortak} className={className}>
+      <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" />
+      <path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" />
     </svg>
   );
 }

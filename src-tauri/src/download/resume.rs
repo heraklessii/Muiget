@@ -231,9 +231,12 @@ pub fn target_from_meta_path(meta: &Path) -> Option<PathBuf> {
 /// `.muiget` meta dosyaları. Bu fonksiyon onları toplayıp (hedef dosya, meta)
 /// çiftleri olarak döndürüyor — listeyi oturumlar arası taşımanın yolu bu.
 ///
-/// Yalnızca verilen klasörün kendisine bakılıyor, alt klasörlere inilmiyor:
-/// kullanıcının İndirilenler klasörü altında binlerce dosya olabilir ve
-/// açılışı yavaşlatmak, kapsamı genişletmekten daha pahalıya gelirdi.
+/// Klasörün kendisine ve **yalnızca kategori alt klasörlerine** bakılıyor.
+/// Serbest özyineleme yok: kullanıcının İndirilenler klasörü altında binlerce
+/// dosya olabilir ve açılışı yavaşlatmak, kapsamı genişletmekten pahalıya
+/// gelirdi. Kategori klasörleri istisna çünkü dosyaları oraya bu uygulama
+/// koyuyor (bkz. [`super::category`]); taranmasalardı kategori açıkken yarım
+/// indirmeler açılışta listeye hiç dönmezdi.
 ///
 /// Sağlıksız kayıtlar sessizce eleniyor:
 /// * bozuk ya da okunamayan JSON — log'a yazılıp geçiliyor
@@ -241,12 +244,32 @@ pub fn target_from_meta_path(meta: &Path) -> Option<PathBuf> {
 /// * `.mgpart` dosyası kaybolmuş meta — öksüz sayılıp siliniyor. Listede
 ///   "yarısı inmiş" gösterip sonra sıfırdan başlamak kullanıcıyı yanıltırdı.
 pub async fn scan_directory(dir: &Path) -> Vec<(PathBuf, ResumeMeta)> {
+    let mut bulunan = scan_one(dir).await;
+
+    for kategori in super::category::folder_names() {
+        let alt = dir.join(kategori);
+        // Klasör yoksa `scan_one` zaten boş dönüyor; ayrıca var mı diye
+        // bakmak fazladan bir sistem çağrısı olurdu.
+        bulunan.extend(scan_one(&alt).await);
+    }
+
+    // En eski indirme en başta: listenin sırası oturumlar arasında korunuyor.
+    bulunan.sort_by_key(|(_, meta)| meta.created_at);
+    bulunan
+}
+
+/// Tek bir klasörü tarar — alt klasörlere inmez.
+async fn scan_one(dir: &Path) -> Vec<(PathBuf, ResumeMeta)> {
     let mut girdiler = match tokio::fs::read_dir(dir).await {
         Ok(g) => g,
         Err(e) => {
             // Klasör silinmiş ya da erişilemiyor olabilir; açılışı durduracak
             // bir sebep değil.
-            log::warn!("{} taranamadı: {e}", dir.display());
+            // Kategori klasörleri çoğu kurulumda hiç yok; her açılışta
+            // "taranamadı" diye uyarmak log'u anlamsız yere doldururdu.
+            if e.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("{} taranamadı: {e}", dir.display());
+            }
             return Vec::new();
         }
     };
@@ -280,8 +303,6 @@ pub async fn scan_directory(dir: &Path) -> Vec<(PathBuf, ResumeMeta)> {
         }
     }
 
-    // En eski indirme en başta: listenin sırası oturumlar arasında korunuyor.
-    bulunan.sort_by_key(|(_, meta)| meta.created_at);
     bulunan
 }
 
@@ -617,5 +638,42 @@ mod tests {
 
         // İkinci çağrı da patlamamalı — dosya zaten yok.
         ResumeMeta::cleanup(&target).await;
+    }
+
+    #[tokio::test]
+    async fn tarama_kategori_klasorlerine_de_bakiyor() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Kategori kapalıyken inen bir dosya kökte.
+        yarim_indirme_kur(dir.path(), "kokte.bin", 100).await;
+
+        // Kategori açıkken inenler alt klasörde. Taranmasalardı bu indirmeler
+        // uygulama yeniden açılınca listeye hiç dönmezdi.
+        let video = dir.path().join("Video");
+        tokio::fs::create_dir_all(&video).await.unwrap();
+        yarim_indirme_kur(&video, "film.mkv", 200).await;
+
+        let muzik = dir.path().join("Müzik");
+        tokio::fs::create_dir_all(&muzik).await.unwrap();
+        yarim_indirme_kur(&muzik, "parca.mp3", 300).await;
+
+        let bulunan = scan_directory(dir.path()).await;
+        let adlar: Vec<_> = bulunan.iter().map(|(_, m)| m.file_name.clone()).collect();
+        assert_eq!(adlar, vec!["kokte.bin", "film.mkv", "parca.mp3"]);
+
+        // Yollar gerçekten alt klasörü gösteriyor.
+        let film = bulunan.iter().find(|(_, m)| m.file_name == "film.mkv").unwrap();
+        assert!(film.0.starts_with(&video), "hedef yol kategori klasöründe olmalı");
+    }
+
+    #[tokio::test]
+    async fn tarama_kategori_disi_alt_klasore_inmiyor() {
+        let dir = tempfile::tempdir().unwrap();
+        let baska = dir.path().join("RastgeleKlasor");
+        tokio::fs::create_dir_all(&baska).await.unwrap();
+        yarim_indirme_kur(&baska, "gizli.bin", 100).await;
+
+        // Serbest özyineleme bilinçli olarak yok (karar #15).
+        assert!(scan_directory(dir.path()).await.is_empty());
     }
 }

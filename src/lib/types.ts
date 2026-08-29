@@ -71,6 +71,8 @@ export interface ManagerConfig {
   maxConnectionsPerHost: number;
   /** Aynı anda kaç indirme çalışsın. 0 = sınırsız; fazlası kuyrukta bekler. */
   maxConcurrentDownloads: number;
+  /** İnen dosyayı türüne göre alt klasöre koy. */
+  categorize: boolean;
   globalSpeedLimit: number;
   bandwidthRules: BandwidthRule[];
   userAgent: string;

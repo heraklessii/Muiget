@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
 import { errorMessage, probeUrl } from '../lib/api';
@@ -8,8 +8,13 @@ import { IconClose, IconFolder } from './Icons';
 
 interface Props {
   defaultDirectory: string;
+  /** Sürükle-bırakla gelen adres. Verilirse kutu dolu açılıyor ve yoklama
+      kullanıcı bir tuşa basmadan başlıyor. */
+  initialUrl?: string;
   onClose: () => void;
   onStart: (url: string, directory: string) => Promise<void>;
+  /** Birden çok adres yapıştırıldığında — tek yenileme turuyla hepsini başlatır. */
+  onStartMany: (urls: string[], directory: string) => Promise<void>;
 }
 
 /**
@@ -20,8 +25,14 @@ interface Props {
  * olmadığını görüyor. Yoklama başarısız olsa bile indirme engellenmiyor —
  * bazı sunucular HEAD'e kapalı ama GET'e açık.
  */
-export function AddDialog({ defaultDirectory, onClose, onStart }: Props) {
-  const [url, setUrl] = useState('');
+export function AddDialog({
+  defaultDirectory,
+  initialUrl,
+  onClose,
+  onStart,
+  onStartMany,
+}: Props) {
+  const [url, setUrl] = useState(initialUrl ?? '');
   const [directory, setDirectory] = useState(defaultDirectory);
   const [caps, setCaps] = useState<ServerCapabilities | null>(null);
   const [probing, setProbing] = useState(false);
@@ -33,6 +44,24 @@ export function AddDialog({ defaultDirectory, onClose, onStart }: Props) {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  /**
+   * Kutuya birden çok adres yapıştırılmış olabilir (IDM'in "toplu indirme"si).
+   *
+   * `<input>` satır sonlarını boşluğa çevirdiği için ayırıcı olarak boşluk
+   * yetiyor. Tek adreste davranış eskisi gibi: yoklama + önizleme. Birden
+   * çoksa yoklama atlanıyor — on sunucuyu sırayla yoklamak kullanıcıyı
+   * bekletirdi ve önizleme zaten tek dosyayı anlatmak için tasarlandı.
+   */
+  const adresler = useMemo(
+    () =>
+      url
+        .split(/\s+/)
+        .map((parca) => parca.trim())
+        .filter((parca) => /^https?:\/\/\S+$/i.test(parca)),
+    [url],
+  );
+  const toplu = adresler.length > 1;
 
   // Esc ile kapatma — diyalog açıkken tüm pencerede geçerli.
   useEffect(() => {
@@ -46,7 +75,7 @@ export function AddDialog({ defaultDirectory, onClose, onStart }: Props) {
   // URL değişince yoklama — her tuş vuruşunda istek atmamak için gecikmeli.
   useEffect(() => {
     const kirpilmis = url.trim();
-    if (!/^https?:\/\/\S+$/i.test(kirpilmis)) {
+    if (toplu || !/^https?:\/\/\S+$/i.test(kirpilmis)) {
       setCaps(null);
       setProbeError(null);
       return;
@@ -76,7 +105,7 @@ export function AddDialog({ defaultDirectory, onClose, onStart }: Props) {
       iptal = true;
       window.clearTimeout(zamanlayici);
     };
-  }, [url]);
+  }, [url, toplu]);
 
   async function klasorSec() {
     const secilen = await openDialog({ directory: true, defaultPath: directory });
@@ -84,18 +113,21 @@ export function AddDialog({ defaultDirectory, onClose, onStart }: Props) {
   }
 
   async function basla() {
-    const kirpilmis = url.trim();
-    if (!kirpilmis) return;
+    if (adresler.length === 0) return;
 
     setStarting(true);
     try {
-      await onStart(kirpilmis, directory);
+      if (toplu) {
+        await onStartMany(adresler, directory);
+      } else {
+        await onStart(adresler[0], directory);
+      }
     } finally {
       setStarting(false);
     }
   }
 
-  const gecerli = /^https?:\/\/\S+$/i.test(url.trim());
+  const gecerli = adresler.length > 0;
 
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -118,7 +150,7 @@ export function AddDialog({ defaultDirectory, onClose, onStart }: Props) {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && gecerli && !starting) void basla();
               }}
-              placeholder="https://ornek.com/dosya.zip"
+              placeholder="https://ornek.com/dosya.zip — birden çok adresi boşlukla ayırın"
               spellCheck={false}
               autoComplete="off"
             />
@@ -138,6 +170,14 @@ export function AddDialog({ defaultDirectory, onClose, onStart }: Props) {
               </button>
             </div>
           </label>
+
+          {toplu && (
+            <p className="field-hint">
+              <strong>{adresler.length} bağlantı</strong> bulundu. Hepsi kuyruğa alınacak;
+              eşzamanlı indirme sınırı ayarlardan geliyor. Toplu eklemede sunucu
+              önizlemesi gösterilmiyor.
+            </p>
+          )}
 
           {probing && <p className="field-hint">Sunucu yoklanıyor…</p>}
 
@@ -182,7 +222,11 @@ export function AddDialog({ defaultDirectory, onClose, onStart }: Props) {
             Vazgeç
           </button>
           <button className="button primary" onClick={basla} disabled={!gecerli || starting}>
-            {starting ? 'Başlatılıyor…' : 'İndir'}
+            {starting
+              ? 'Başlatılıyor…'
+              : toplu
+                ? `${adresler.length} dosyayı indir`
+                : 'İndir'}
           </button>
         </div>
       </div>

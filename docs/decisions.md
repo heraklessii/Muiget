@@ -490,3 +490,82 @@ ve devam etmek onu dosya yolu sanıp klasörün üstüne yazmaya çalışıyordu
   seçmek için yine bir sıra tutmak gerekirdi; `pump` daha az parça.
 - Sınırı arayüzde uygulamak: köprüden (uzantıdan) gelen indirmeler sınırı
   hiç görmezdi.
+
+---
+
+## #17 — Host Kotası İndirmeler Arasında Bölüşülüyor, İzin Sırasında Değil
+
+**Durum:** Kabul edildi
+
+**Bağlam:** Karar #2'nin host kotası (`max_connections_per_host`, varsayılan 8)
+sunucuyu koruyordu ama indirmeler arasında adalet sağlamıyordu. Aynı siteden üç
+dosya başlatılınca gerçekte şu oluyordu: ilk indirme sekiz iznin hepsini alıyor,
+diğer ikisi **sıfır byte'ta** bekliyor ve ancak ilki bitmeye yaklaşınca
+başlıyordu. Arayüz dürüst davranıp "Bağlantı bekleniyor" yazıyordu ama kullanıcı
+açısından ikinci ve üçüncü indirme takılmış görünüyordu.
+
+Sebep, iznin **segment ömrü boyunca** tutulması: bir worker izni aldığında
+segmenti bitene kadar bırakmıyor. Segmentler kabaca eşit büyüklükte olduğu için
+hepsi indirmenin sonunda birlikte serbest kalıyor.
+
+**Karar:** Adalet izin dağıtımında değil **segment planında** uygulanıyor.
+`HostLimiter` artık host başına kaç *indirme* olduğunu da biliyor
+(`register()` → RAII kayıt) ve `fair_share()` her indirmeye düşen payı veriyor:
+
+```text
+pay = max(1, max_per_host / o hosttaki indirme sayısı)
+```
+
+Süpervizör başlarken kaydını yapıp `config.segments`i payla sınırlıyor. Üç
+indirme × 2 segment = 6 bağlantı: kota aşılmıyor ve kimse aç kalmıyor.
+
+**Rebalans bedava geliyor:** bir indirme bitince kaydı düşüyor, kalanların payı
+büyüyor ve adaptif bölme (`try_steal`, karar #5) zaten boşalan slotu
+değerlendiriyor. Yani ayrı bir yeniden dağıtım mekanizması yazılmadı; var olan
+"work stealing" makinesi pay kontrolüyle rebalanser'a dönüştü.
+
+**Gerekçe:**
+- İzni chunk başına almak (adaletli kuyruk) her chunk'ta bağlantıyı bırakmak
+  demek olurdu — TCP+TLS el sıkışmasını sürekli tekrarlamak.
+- Payın sıfır olmasına izin verilmiyor (`max(1, …)`): sıfır pay, indirmenin hiç
+  başlayamaması demekti.
+- Sürmekte olan indirmenin segmentleri yeni bir indirme geldiğinde **kesilmiyor**.
+  Kesmek anlık adalet verirdi ama yarım TCP bağlantılarını çöpe atardı; birkaç
+  saniyelik gecikme bundan ucuz.
+
+**Alternatifler:**
+- Global bir bağlantı zamanlayıcısı: doğru çözüm ama motorun her katmanına
+  dokunurdu; kazanç aynı, karmaşıklık kat kat fazla.
+- Kotayı büyütmek: sunucuyu korumak için konulan sınırı adalet için gevşetmek
+  olurdu — yanlış düğme.
+
+---
+
+## #18 — Kategori Klasörleri: Gömülü Eşleme, Varsayılan Kapalı
+
+**Durum:** Kabul edildi
+
+**Bağlam:** IDM'in en görünür davranışlarından biri inen dosyayı türüne göre
+`Video`, `Müzik`, `Belgeler`… alt klasörlerine ayırması. İki soru vardı:
+kurallar kullanıcı tarafından düzenlenebilsin mi, ve varsayılan açık mı?
+
+**Karar:** Eşleme koda gömülü (`download/category.rs`), özellik ayarlardan tek
+anahtarla açılıp kapanıyor ve **varsayılan kapalı**.
+
+**Gerekçe:**
+- Kural düzenleyicisi bu aşamada çözdüğünden çok soru doğururdu: çakışan
+  kurallar, sıra, büyük/küçük harf, kullanıcının bozduğu eşlemeyi kurtarma.
+  Gömülü liste bir dosyada duruyor ve katkıya açık.
+- Varsayılan kapalı, çünkü bir sürüm yükseltmesinin indirmelerin **nereye
+  düştüğünü** sessizce değiştirmesi, kullanıcıya dosyasını kaybettirmek gibi
+  gelirdi. Açmak tek tıklama; geri almak dosya aramak demek.
+- Tanınmayan uzantı için "Diğer" klasörü **yok**: dosyayı bir kat daha derine
+  gömmek, aramayı kolaylaştırmıyor.
+- Sürmekte olan indirmeler taşınmıyor. Hedef yol metada yazılı (karar #3) ve
+  dosyayı altından çekmek resume'u bozardı.
+
+**Karar #15 ile etkileşimi:** oturumlar arası liste `.muiget` taramasıyla geri
+geliyordu ve tarama tek seviyeydi. Kategori açıkken yarım indirmeler alt
+klasörde olacağı için tarama, **yalnızca bilinen kategori klasörlerine** de
+bakıyor. Serbest özyineleme hâlâ yok: o klasörlere dosyayı bu uygulama koyuyor,
+gerisi kullanıcının alanı.

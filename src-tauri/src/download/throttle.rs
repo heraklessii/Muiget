@@ -117,10 +117,22 @@ impl RateLimiter {
 ///
 /// Segment sayısı 8 iken üç dosyayı aynı sunucudan indirmek 24 bağlantı demek;
 /// çoğu sunucu bunu reddediyor ve indirmeler hata alıyor. Kota bunu önlüyor.
+///
+/// Kota tek başına yetmiyordu: aynı host'tan üç indirme başlatılınca ilki
+/// sekiz iznin hepsini alıyor, diğer ikisi sıfır byte'ta bekliyordu. Bu yüzden
+/// limiter host başına **kaç indirme** olduğunu da biliyor ve
+/// [`fair_share`](Self::fair_share) ile her indirmeye düşen payı veriyor.
+/// İzinler segment boyunca tutulduğu için pay, izin dağıtımında değil
+/// **segment planında** uygulanıyor: az segment aç, kimse aç kalmasın.
 #[derive(Debug)]
 pub struct HostLimiter {
     max_per_host: usize,
     semaphores: Mutex<HashMap<String, Arc<Semaphore>>>,
+    /// Host başına aktif **indirme** sayısı (segment değil).
+    ///
+    /// `std::sync::Mutex`: sayaç senkron bağlamlardan da okunuyor
+    /// (`try_steal` async değil) ve kilit altında yalnızca birkaç komut var.
+    active: std::sync::Mutex<HashMap<String, usize>>,
 }
 
 impl HostLimiter {
@@ -128,6 +140,7 @@ impl HostLimiter {
         Arc::new(HostLimiter {
             max_per_host: max_per_host.max(1),
             semaphores: Mutex::new(HashMap::new()),
+            active: std::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -146,8 +159,44 @@ impl HostLimiter {
         semaphore.acquire_owned().await.expect("host semaforu kapatılmadı")
     }
 
+    /// Bir indirmeyi host'a kaydeder. Dönen kayıt düşünce sayaç azalıyor, yani
+    /// indirme biterse/duraklarsa kalanların payı kendiliğinden büyüyor.
+    pub fn register(self: &Arc<Self>, host: &str) -> HostRegistration {
+        *self.active.lock().unwrap().entry(host.to_string()).or_insert(0) += 1;
+        HostRegistration { limiter: Arc::clone(self), host: host.to_string() }
+    }
+
+    /// Host'taki her indirmeye düşen bağlantı payı.
+    ///
+    /// Hiç kayıt yoksa da en az 1 dönüyor: pay sıfır olsaydı indirme hiç
+    /// segment açamaz, yani hiç başlayamazdı.
+    pub fn fair_share(&self, host: &str) -> usize {
+        let kayitli = self.active.lock().unwrap().get(host).copied().unwrap_or(0).max(1);
+        (self.max_per_host / kayitli).max(1)
+    }
+
     pub fn max_per_host(&self) -> usize {
         self.max_per_host
+    }
+}
+
+/// Bir indirmenin bir host üzerindeki varlığı. Süpervizör hayatta olduğu sürece
+/// tutuluyor; düşünce host'un pay hesabından çıkıyor.
+#[derive(Debug)]
+pub struct HostRegistration {
+    limiter: Arc<HostLimiter>,
+    host: String,
+}
+
+impl Drop for HostRegistration {
+    fn drop(&mut self) {
+        let mut map = self.limiter.active.lock().unwrap();
+        if let Some(sayi) = map.get_mut(&self.host) {
+            *sayi = sayi.saturating_sub(1);
+            if *sayi == 0 {
+                map.remove(&self.host);
+            }
+        }
     }
 }
 
@@ -369,5 +418,51 @@ mod tests {
         .expect("izin bırakılınca sıradaki devralmalı");
 
         drop(b);
+    }
+
+    #[test]
+    fn pay_ayni_hosttaki_indirmeler_arasinda_bolusuyor() {
+        let limiter = HostLimiter::new(8);
+
+        // Tek indirme kotanın tamamını kullanabilir.
+        let a = limiter.register("ornek.com");
+        assert_eq!(limiter.fair_share("ornek.com"), 8);
+
+        let b = limiter.register("ornek.com");
+        assert_eq!(limiter.fair_share("ornek.com"), 4);
+
+        let c = limiter.register("ornek.com");
+        // 8 / 3 = 2; toplam 6 bağlantı, kota aşılmıyor ve kimse aç kalmıyor.
+        assert_eq!(limiter.fair_share("ornek.com"), 2);
+
+        // Başka host etkilenmiyor.
+        assert_eq!(limiter.fair_share("baska.com"), 8);
+
+        // İndirme bitince pay büyüyor — adaptif bölme bunu değerlendiriyor.
+        drop(c);
+        assert_eq!(limiter.fair_share("ornek.com"), 4);
+        drop(b);
+        assert_eq!(limiter.fair_share("ornek.com"), 8);
+        drop(a);
+        assert_eq!(limiter.fair_share("ornek.com"), 8);
+    }
+
+    #[test]
+    fn pay_hicbir_zaman_sifir_olmuyor() {
+        let limiter = HostLimiter::new(2);
+        let _kayitlar: Vec<_> = (0..5).map(|_| limiter.register("ornek.com")).collect();
+
+        // 2 / 5 = 0 olurdu; sıfır pay indirmenin hiç başlayamaması demek.
+        assert_eq!(limiter.fair_share("ornek.com"), 1);
+    }
+
+    #[test]
+    fn kayit_dusunce_host_tablodan_siliniyor() {
+        let limiter = HostLimiter::new(4);
+        {
+            let _k = limiter.register("ornek.com");
+            assert_eq!(limiter.active.lock().unwrap().len(), 1);
+        }
+        assert!(limiter.active.lock().unwrap().is_empty(), "kayıt sızmamalı");
     }
 }

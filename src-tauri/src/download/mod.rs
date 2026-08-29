@@ -15,6 +15,7 @@
 //!
 //! Mimari kararların gerekçesi için `docs/decisions.md` #3, #4, #5.
 
+pub mod category;
 pub mod http;
 pub mod manager;
 pub mod resume;

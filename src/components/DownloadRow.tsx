@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, type MouseEvent } from 'react';
 
 import {
   fileExtension,
@@ -24,6 +24,8 @@ interface Props {
   onCancel: (id: string) => void;
   onRemove: (id: string) => void;
   onReveal: (path: string) => void;
+  /** Satıra sağ tıklandı — bağlam menüsünü açan taraf `App`. */
+  onContextMenu: (event: MouseEvent, id: string) => void;
 }
 
 const DURUM_METNI: Record<DownloadStatus, string> = {
@@ -60,6 +62,7 @@ export const DownloadRow = memo(function DownloadRow({
   onCancel,
   onRemove,
   onReveal,
+  onContextMenu,
 }: Props) {
   const oran = download.totalSize > 0 ? download.downloaded / download.totalSize : 0;
   const aktif = isActive(download.status);
@@ -79,7 +82,10 @@ export const DownloadRow = memo(function DownloadRow({
   const durumMetni = baglantiBekliyor ? 'Bağlantı bekleniyor' : DURUM_METNI[download.status];
 
   return (
-    <article className={`download is-${download.status}`}>
+    <article
+      className={`download is-${download.status}`}
+      onContextMenu={(e) => onContextMenu(e, download.id)}
+    >
       <div className="download__head">
         <div className="download__icon" aria-hidden>
           {uzanti || '?'}
