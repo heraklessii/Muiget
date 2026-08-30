@@ -135,6 +135,16 @@ impl AppSettings {
             self.engine.user_agent = crate::download::http::DEFAULT_USER_AGENT.to_string();
         }
         self.engine.proxy = normalize_proxy(&self.engine.proxy);
+
+        // Akış ayarları (karar #25). Kalite dizgesi kırpılmıyor: tanınmayan
+        // değer zaten `Quality::parse` içinde "en yüksek"e düşüyor ve orada
+        // gerekçesi yazılı.
+        self.engine.ffmpeg_path = self.engine.ffmpeg_path.trim().to_string();
+        self.engine.media_language = self.engine.media_language.trim().to_ascii_lowercase();
+        self.engine.media_quality = self.engine.media_quality.trim().to_ascii_lowercase();
+        // Üst sınır 16: bir CDN'e daha fazla eşzamanlı parça isteği atmak
+        // indirmeyi hızlandırmıyor, 429 riskini artırıyor.
+        self.engine.media_concurrency = self.engine.media_concurrency.clamp(1, 16);
         if self.theme != "light" {
             self.theme = "dark".to_string();
         }
@@ -363,6 +373,34 @@ mod tests {
         assert!(a.check_updates, "eksik alan varsayılan olarak açık gelmeli");
         assert!(!a.clipboard_watch, "pano izleme eksik alanda kapalı gelmeli");
         assert_eq!(a.engine.proxy, "", "eksik alanda doğrudan bağlantı");
+
+        // Akış ayarları (karar #25) sonradan eklendi; eski dosyalarda yoklar.
+        // `media_concurrency` özellikle önemli: serde varsayılanı olmasaydı 0
+        // okunur ve hiçbir video parçası inmezdi.
+        assert_eq!(a.engine.media_quality, "best");
+        assert_eq!(a.engine.media_concurrency, 6);
+        assert_eq!(a.engine.ffmpeg_path, "", "eksik alanda ffmpeg otomatik aranmalı");
+        assert_eq!(a.engine.media_language, "");
+    }
+
+    #[tokio::test]
+    async fn akis_ayarlari_normalize_ediliyor() {
+        let mut a = ornek();
+        a.engine.media_concurrency = 0;
+        a.engine.ffmpeg_path = "  C:/araclar/ffmpeg.exe  ".into();
+        a.engine.media_language = " TR ".into();
+        a.engine.media_quality = " 720P ".into();
+        a.normalize();
+
+        // 0 eşzamanlı parça indirmeyi sonsuza kadar bekletirdi.
+        assert_eq!(a.engine.media_concurrency, 1);
+        assert_eq!(a.engine.ffmpeg_path, "C:/araclar/ffmpeg.exe");
+        assert_eq!(a.engine.media_language, "tr");
+        assert_eq!(a.engine.media_quality, "720p");
+
+        a.engine.media_concurrency = 99;
+        a.normalize();
+        assert_eq!(a.engine.media_concurrency, 16);
     }
 
     #[tokio::test]

@@ -33,6 +33,7 @@ export const DURUM_METNI: Record<DownloadStatus, string> = {
   queued: 'Sırada',
   probing: 'Sunucu yoklanıyor',
   running: 'İniyor',
+  merging: 'Birleştiriliyor',
   paused: 'Duraklatıldı',
   completed: 'Tamamlandı',
   failed: 'Başarısız',
@@ -43,6 +44,7 @@ const DURUM_SINIFI: Record<DownloadStatus, string> = {
   queued: 'queued',
   probing: '',
   running: 'running',
+  merging: 'running',
   paused: 'paused',
   completed: 'completed',
   failed: 'failed',
@@ -65,7 +67,10 @@ export const DownloadRow = memo(function DownloadRow({
   onReveal,
   onContextMenu,
 }: Props) {
-  const oran = download.totalSize > 0 ? download.downloaded / download.totalSize : 0;
+  // Akışta toplam boyut bir tahmin ve tahmin küçük çıkarsa oran 1'i aşabilir;
+  // %103 dolu bir çubuk kullanıcıya bir şeyin bozuk olduğunu düşündürürdü.
+  const oran =
+    download.totalSize > 0 ? Math.min(download.downloaded / download.totalSize, 1) : 0;
   const aktif = isActive(download.status);
   const uzanti = fileExtension(download.fileName);
 
@@ -104,11 +109,28 @@ export const DownloadRow = memo(function DownloadRow({
             </span>
             {download.totalSize > 0 && (
               <span className="dot">
-                {formatBytes(download.downloaded)} / {formatBytes(download.totalSize)}
+                {formatBytes(download.downloaded)} /{' '}
+                {/* Akışta toplam boyut inen parçalardan tahmin ediliyor; "~"
+                    olmadan kullanıcı onu ölçülmüş bir değer sanardı. */}
+                {download.media?.estimated ? '~' : ''}
+                {formatBytes(download.totalSize)}
               </span>
             )}
-            {download.segments.length > 1 && (
-              <span className="dot">{download.segments.length} parça</span>
+            {download.media ? (
+              <>
+                <span className="dot">
+                  {download.media.segmentsDone}/{download.media.segmentsTotal} parça
+                </span>
+                {download.media.label && (
+                  <span className="dot" title={`${download.media.protocol} akışı`}>
+                    {download.media.label}
+                  </span>
+                )}
+              </>
+            ) : (
+              download.segments.length > 1 && (
+                <span className="dot">{download.segments.length} parça</span>
+              )
             )}
           </div>
         </div>

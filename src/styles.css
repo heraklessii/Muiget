@@ -1024,6 +1024,45 @@ svg {
   color: var(--warning);
 }
 
+/* ---- Akış (HLS/DASH) önizlemesi ----
+   Ayrı bir panel, `.preview` tablosu değil: burada gösterilen bilgi değil
+   **seçim** — kalite ve ses açılır listeleri etkileşimli. */
+.media-panel {
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.media-panel__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+.media-panel__head .dot::before {
+  content: '·';
+  margin-right: var(--space-2);
+}
+
+.media-panel .field-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.media-panel .field-hint svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
 .section-title {
   margin: 0;
   font-size: var(--font-xs);

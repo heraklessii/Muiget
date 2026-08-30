@@ -12,9 +12,11 @@ const UZANTILAR =
 
 const durumEl = document.getElementById('durum');
 const medyaEl = document.getElementById('medya');
+const videolarEl = document.getElementById('videolar');
 const hataEl = document.getElementById('hata');
 const devralEl = document.getElementById('devral');
 const cerezEl = document.getElementById('cerez');
+const videoYakalaEl = document.getElementById('videoYakala');
 
 /* ---------------------------------------------------------------------------
  * Sayfada çalışacak tarayıcı fonksiyonu
@@ -171,6 +173,113 @@ async function medyayiListele() {
 }
 
 /* ---------------------------------------------------------------------------
+ * Yakalanan videolar
+ *
+ * DOM taramasıyla bulunamayan tek tür bunlar: HLS/DASH manifesti sayfanın
+ * HTML'inde geçmiyor, oynatıcı JavaScript'i çalışırken isteniyor. Bu yüzden
+ * liste arka plandaki ağ dinleyicisinden geliyor (bkz. `background.js`).
+ * ------------------------------------------------------------------------- */
+
+/** `.../vod/master.m3u8?token=x` → `vod / master.m3u8` */
+function videoAdi(url) {
+  try {
+    const parcalar = new URL(url).pathname.split('/').filter(Boolean);
+    return decodeURIComponent(parcalar.slice(-2).join(' / ')) || url;
+  } catch {
+    return url;
+  }
+}
+
+async function videolariListele(sekme) {
+  if (!sekme?.id) {
+    videolarEl.innerHTML = '<p class="bos">Bu sayfa taranamıyor.</p>';
+    return;
+  }
+
+  const sonuc = await mesajGonder({ type: 'getVideos', tabId: sekme.id });
+  videoYakalaEl.checked = Boolean(sonuc?.enabled);
+
+  if (!sonuc?.enabled) {
+    videolarEl.innerHTML =
+      '<p class="bos">Video yakalama kapalı. Aşağıdaki anahtarı açıp sayfayı yenileyin.</p>';
+    return;
+  }
+
+  const videolar = sonuc.videos ?? [];
+  if (videolar.length === 0) {
+    videolarEl.innerHTML =
+      '<p class="bos">Bu sayfada video yayını görülmedi. Oynatıcıyı başlatıp tekrar bakın.</p>';
+    return;
+  }
+
+  const liste = document.createElement('ul');
+  liste.className = 'ogeler';
+
+  for (const video of videolar) {
+    const satir = document.createElement('li');
+    satir.className = 'oge';
+
+    const ad = document.createElement('span');
+    ad.className = 'oge__ad';
+    ad.textContent = videoAdi(video.url);
+    ad.title = video.url;
+
+    const tur = document.createElement('span');
+    tur.className = 'oge__tur';
+    tur.textContent = /\.mpd(\?|#|$)/i.test(video.url) ? 'DASH' : 'HLS';
+
+    const dugme = document.createElement('button');
+    dugme.textContent = 'İndir';
+    dugme.addEventListener('click', async () => {
+      dugme.disabled = true;
+      dugme.textContent = '…';
+      try {
+        // Dosya adı **gönderilmiyor**: uzantısı ve kalitesi manifest okunmadan
+        // bilinmiyor. Masaüstü tarafı adı manifestten türetiyor.
+        const yanit = await mesajGonder({
+          type: 'download',
+          payload: { url: video.url, referrer: sekme.url },
+        });
+        if (!yanit?.ok) throw new Error(yanit?.error || 'gönderilemedi');
+        dugme.textContent = 'Gönderildi';
+        hataGoster('');
+      } catch (e) {
+        dugme.textContent = 'Hata';
+        dugme.disabled = false;
+        hataGoster(e.message);
+      }
+    });
+
+    satir.append(ad, tur, dugme);
+    liste.append(satir);
+  }
+
+  videolarEl.replaceChildren(liste);
+}
+
+videoYakalaEl.addEventListener('change', async () => {
+  if (videoYakalaEl.checked) {
+    const verildi = await izinIste({
+      permissions: ['webRequest'],
+      origins: ['<all_urls>'],
+    });
+    if (!verildi) {
+      videoYakalaEl.checked = false;
+      hataGoster('Video yakalamak için ağ isteklerini görme izni gerekiyor.');
+      return;
+    }
+    hataGoster('Açıldı. Şu anki sayfayı yenileyince videolar burada görünecek.');
+    return;
+  }
+
+  // İzni geri almak dinleyiciyi de düşürüyor: kapalıyken uzantı hiçbir ağ
+  // isteğini görmüyor, yalnızca "dinlemiyorum" demiyor.
+  await chrome.permissions.remove({ permissions: ['webRequest'] });
+  videolarEl.innerHTML = '<p class="bos">Video yakalama kapalı.</p>';
+  hataGoster('');
+});
+
+/* ---------------------------------------------------------------------------
  * Ayarlar
  *
  * İki ayar da ek Chrome izni gerektiriyor. İzin ancak kullanıcı anahtarı
@@ -227,5 +336,10 @@ cerezEl.addEventListener('change', async () => {
  * ------------------------------------------------------------------------- */
 
 durumuYenile().catch((e) => hataGoster(e.message));
-medyayiListele().catch((e) => hataGoster(e.message));
 ayarlariYukle().catch((e) => hataGoster(e.message));
+medyayiListele().catch((e) => hataGoster(e.message));
+
+chrome.tabs
+  .query({ active: true, currentWindow: true })
+  .then(([sekme]) => videolariListele(sekme))
+  .catch((e) => hataGoster(e.message));

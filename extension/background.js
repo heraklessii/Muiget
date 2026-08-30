@@ -200,6 +200,102 @@ function dosyaAdi(yol) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Video yakalama (HLS / DASH)
+ *
+ * IDM'i bugün satan özellik bu: sayfadaki oynatıcı videoyu tek bir dosyadan
+ * değil, bir manifest üzerinden yüzlerce parça hâlinde alıyor. O manifestin
+ * adresi sayfanın HTML'inde yok — JavaScript çalışırken isteniyor. Yani
+ * `popup.js`'teki DOM taraması bunu **hiçbir zaman** bulamaz; ağ isteklerine
+ * bakmak şart.
+ *
+ * `webRequest` izni bilerek **isteğe bağlı** ve varsayılan kapalı: verildiğinde
+ * uzantı ziyaret edilen her sayfanın ağ isteklerinin adreslerini görüyor.
+ * Bu ağır bir yetki ve sessizce açık gelmemeli — aynı gerekçe masaüstündeki
+ * pano izlemede de var (karar #24).
+ *
+ * Görülen adresler hiçbir yere gönderilmiyor: yalnızca `storage.session`de,
+ * sekme başına, tarayıcı kapanınca silinecek şekilde tutuluyor ve süzgeçten
+ * geçen (`.m3u8` / `.mpd`) adresler dışında hiçbiri kaydedilmiyor.
+ * ------------------------------------------------------------------------- */
+
+const MANIFEST_DESENI = /\.(m3u8|mpd)(\?|#|$)/i;
+
+/** Sekme başına saklanan en fazla adres. Bir oynatıcı kalite değiştirdikçe
+    yeni manifest istiyor; sınırsız biriktirmenin kimseye faydası yok. */
+const VIDEO_SINIRI = 12;
+
+const videoAnahtari = (tabId) => `video:${tabId}`;
+
+function videoYakala(details) {
+  // `tabId < 0`: sekmeye ait olmayan istek (uzantı, service worker).
+  if (details.tabId < 0) return;
+  if (!MANIFEST_DESENI.test(details.url)) return;
+  void videoKaydet(details.tabId, details.url);
+}
+
+async function videoKaydet(tabId, url) {
+  const anahtar = videoAnahtari(tabId);
+  const kayit = await chrome.storage.session.get(anahtar);
+  const liste = kayit[anahtar] ?? [];
+  if (liste.some((v) => v.url === url)) return;
+
+  liste.unshift({ url, at: Date.now() });
+  await chrome.storage.session.set({ [anahtar]: liste.slice(0, VIDEO_SINIRI) });
+
+  // Sekmeye özel rozet: geçici "✓ / !" rozetleri genel olduğu için
+  // birbirlerini ezmiyorlar.
+  await chrome.action.setBadgeText({ tabId, text: String(Math.min(liste.length, 9)) });
+  await chrome.action.setBadgeBackgroundColor({ tabId, color: '#7c5cff' });
+}
+
+/** Dinleyiciyi kurar. İzin verilmemişse sessizce vazgeçiyor. */
+function videoDinleyiciyiKur() {
+  if (!chrome.webRequest?.onBeforeRequest) return false;
+  if (chrome.webRequest.onBeforeRequest.hasListener(videoYakala)) return true;
+
+  try {
+    chrome.webRequest.onBeforeRequest.addListener(videoYakala, { urls: ['<all_urls>'] });
+    return true;
+  } catch (e) {
+    // Host izni verilmemiş olabilir.
+    console.warn('Muiget: video yakalama kurulamadı', e);
+    return false;
+  }
+}
+
+export async function videoYakalamaAcikMi() {
+  return chrome.permissions.contains({
+    permissions: ['webRequest'],
+    origins: ['<all_urls>'],
+  });
+}
+
+export async function sekmeninVideolari(tabId) {
+  const kayit = await chrome.storage.session.get(videoAnahtari(tabId));
+  return kayit[videoAnahtari(tabId)] ?? [];
+}
+
+/** Sayfa değişince liste sıfırlanıyor: önceki sayfanın videosunu göstermek
+    kullanıcıyı yanıltırdı. */
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!changeInfo.url) return;
+  void chrome.storage.session.remove(videoAnahtari(tabId));
+  void chrome.action.setBadgeText({ tabId, text: '' });
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void chrome.storage.session.remove(videoAnahtari(tabId));
+});
+
+// İzin sonradan verilirse service worker'ı yeniden başlatmadan devreye gir.
+chrome.permissions.onAdded.addListener(() => {
+  videoDinleyiciyiKur();
+});
+
+// Service worker her uyanışta yeniden çalışıyor; dinleyici burada kuruluyor.
+videoDinleyiciyiKur();
+
+/* ---------------------------------------------------------------------------
  * Popup ile mesajlaşma
  * ------------------------------------------------------------------------- */
 
@@ -221,6 +317,13 @@ chrome.runtime.onMessage.addListener((mesaj, _sender, sendResponse) => {
         case 'setSettings':
           await chrome.storage.local.set(mesaj.payload);
           sendResponse(await ayarlariAl());
+          break;
+        case 'getVideos':
+          sendResponse({
+            ok: true,
+            enabled: await videoYakalamaAcikMi(),
+            videos: await sekmeninVideolari(mesaj.tabId),
+          });
           break;
         default:
           sendResponse({ ok: false, error: 'bilinmeyen mesaj' });

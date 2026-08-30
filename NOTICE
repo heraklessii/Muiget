@@ -125,6 +125,18 @@ md-5 — MD5 hash function (RustCrypto)
   https://github.com/RustCrypto/hashes
 
 --------------------------------------------------------------------------------
+aes — AES block cipher (RustCrypto)
+  Copyright (c) RustCrypto Developers
+  License: Apache License 2.0 OR MIT
+  https://github.com/RustCrypto/block-ciphers
+
+--------------------------------------------------------------------------------
+cbc — Cipher Block Chaining mode (RustCrypto)
+  Copyright (c) RustCrypto Developers
+  License: Apache License 2.0 OR MIT
+  https://github.com/RustCrypto/block-modes
+
+--------------------------------------------------------------------------------
 rustls — TLS implementation (used by reqwest)
   Copyright (c) 2016 Joseph Birr-Pixton
   License: Apache License 2.0 OR ISC OR MIT

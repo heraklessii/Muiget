@@ -81,8 +81,80 @@ pub struct ResumeMeta {
     /// olmasaydı devam eden indirme `Referer` olmadan gidip 403 alırdı.
     #[serde(default)]
     pub options: DownloadOptions,
+    /// Akış (HLS/DASH) indirmesiyse devam noktası. Sıradan HTTP indirmelerinde
+    /// `None`; eski meta dosyalarında alan hiç yok.
+    #[serde(default)]
+    pub media: Option<MediaResume>,
     pub created_at: u64,
     pub updated_at: u64,
+}
+
+/// Akış indirmesinin devam noktası.
+///
+/// Sıradan indirmede devam noktası byte aralıkları (bkz. [`Segment`]); akışta
+/// öyle bir şey yok, çünkü çıktı dosyası yüzlerce ayrı parçanın **sırayla**
+/// eklenmesiyle büyüyor. Bu yüzden devam noktası iki sayıdan ibaret: kaç parça
+/// tamamlandı ve dosya kaç byte. Dosya devam ederken bu boya kırpılıyor, yani
+/// meta yazılmadan önce çökülse bile yarım kalmış son parça temizleniyor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaResume {
+    /// Manifestin adresi. Değişmişse devam edilmiyor.
+    pub manifest_url: String,
+    /// `hls` | `dash` — yalnızca gösterim ve günlük için.
+    pub protocol: String,
+    pub video_track: String,
+    pub audio_track: Option<String>,
+    pub video_total: usize,
+    pub audio_total: usize,
+    pub video_done: usize,
+    pub audio_done: usize,
+    pub video_bytes: u64,
+    pub audio_bytes: u64,
+    /// ffmpeg ile birleştirme gerekiyor mu (ayrı ses var).
+    pub merge: bool,
+    /// Arayüzde gösterilen kalite etiketi (`1920x1080 · 5.0 Mbps`).
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+impl MediaResume {
+    /// İnmiş parça sayısı (ses dâhil).
+    pub fn done(&self) -> usize {
+        self.video_done + self.audio_done
+    }
+
+    /// Toplam parça sayısı (ses dâhil).
+    pub fn total(&self) -> usize {
+        self.video_total + self.audio_total
+    }
+
+    pub fn bytes(&self) -> u64 {
+        self.video_bytes + self.audio_bytes
+    }
+
+    /// Kaydedilen devam noktası yeniden çözülen planla uyuşuyor mu?
+    ///
+    /// Manifest yeniden indiriliyor ve parça listesi değişmiş olabilir (CDN
+    /// kalite ekleyip çıkarabiliyor, canlıdan VOD'a geçen yayınlarda parça
+    /// sayısı değişiyor). Uyuşmuyorsa baştan başlamak şart: eski parçaların
+    /// üzerine yenilerini eklemek sessizce bozuk bir video verirdi.
+    pub fn matches(
+        &self,
+        manifest_url: &str,
+        video_track: &str,
+        audio_track: Option<&str>,
+        video_total: usize,
+        audio_total: usize,
+    ) -> bool {
+        self.manifest_url == manifest_url
+            && self.video_track == video_track
+            && self.audio_track.as_deref() == audio_track
+            && self.video_total == video_total
+            && self.audio_total == audio_total
+            && self.video_done <= video_total
+            && self.audio_done <= audio_total
+    }
 }
 
 impl ResumeMeta {
@@ -105,6 +177,33 @@ impl ResumeMeta {
             segments,
             supports_ranges: caps.supports_ranges,
             options: DownloadOptions::default(),
+            media: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Akış (HLS/DASH) indirmesi için meta.
+    ///
+    /// [`new`](Self::new) sunucu yeteneklerinden türetiliyor; akışta öyle bir
+    /// şey yok — manifest bir dosya değil, dosya listesi. `total_size`,
+    /// `etag` ve segment aralıkları bu yüzden boş: devam noktasının tamamı
+    /// [`MediaResume`] içinde.
+    pub fn for_media(id: String, url: String, file_name: String, media: MediaResume) -> Self {
+        let now = unix_now();
+        ResumeMeta {
+            version: META_VERSION,
+            final_url: url.clone(),
+            id,
+            url,
+            file_name,
+            total_size: 0,
+            etag: None,
+            last_modified: None,
+            segments: Vec::new(),
+            supports_ranges: false,
+            options: DownloadOptions::default(),
+            media: Some(media),
             created_at: now,
             updated_at: now,
         }

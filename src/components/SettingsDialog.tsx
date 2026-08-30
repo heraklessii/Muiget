@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
-import { errorMessage, installNativeHost } from '../lib/api';
+import { errorMessage, ffmpegStatus, installNativeHost } from '../lib/api';
 
 import {
   bytesToMbps,
@@ -9,7 +9,7 @@ import {
   mbpsToBytes,
   minuteToClock,
 } from '../lib/format';
-import type { AppSettings, BandwidthRule } from '../lib/types';
+import type { AppSettings, BandwidthRule, FfmpegInfo } from '../lib/types';
 import { IconClose, IconFolder, IconPlus, IconTrash } from './Icons';
 
 interface Props {
@@ -54,6 +54,27 @@ export function SettingsDialog({ settings, onClose, onSave, onSaveQuiet, onResca
   const [kopruSonucu, setKopruSonucu] = useState<string | null>(null);
   const [taraniyor, setTaraniyor] = useState(false);
   const [taramaSonucu, setTaramaSonucu] = useState<string | null>(null);
+  /**
+   * ffmpeg sınama sonucu. `null` = henüz sınanmadı.
+   *
+   * Kaydetmeden sınanabiliyor: yolu yazıp "Kaydet"e basmak, sonra bir video
+   * indirmeyi denemek ve orada "ffmpeg yok" görmek uzun bir geri bildirim
+   * döngüsü olurdu.
+   */
+  const [ffmpeg, setFfmpeg] = useState<FfmpegInfo | 'yok' | null>(null);
+  const [ffmpegSinaniyor, setFfmpegSinaniyor] = useState(false);
+
+  async function ffmpegSina() {
+    setFfmpegSinaniyor(true);
+    try {
+      // "Bulunamadı" da bir sonuç: `null` yalnızca "henüz sınanmadı" demek.
+      setFfmpeg((await ffmpegStatus(taslak.engine.ffmpegPath)) ?? 'yok');
+    } catch {
+      setFfmpeg('yok');
+    } finally {
+      setFfmpegSinaniyor(false);
+    }
+  }
 
   /** Klasördeki `.muiget` dosyalarını listeye geri yükler. */
   async function klasoruTara() {
@@ -403,6 +424,118 @@ export function SettingsDialog({ settings, onClose, onSave, onSaveQuiet, onResca
               placeholder="doğrudan bağlantı"
               spellCheck={false}
               autoComplete="off"
+            />
+          </label>
+
+          {/* ---- Video (HLS/DASH) ---- */}
+          <h3 className="section-title">Video akışları</h3>
+
+          <label className="field row">
+            <span>
+              ffmpeg yolu
+              <br />
+              <span className="field-hint">
+                Boş bırakılırsa uygulamanın yanına, sonra <code>PATH</code>e bakılır.
+                ffmpeg yalnızca iki iş için gerekli: <code>.ts</code> dosyalarını{' '}
+                <code>.mp4</code>e çevirmek ve ayrı inen sesi görüntüyle
+                birleştirmek. Yeniden kodlama yapılmıyor.
+              </span>
+            </span>
+            <div className="row">
+              <input
+                className="text-input"
+                style={{ width: 200 }}
+                value={taslak.engine.ffmpegPath}
+                onChange={(e) => {
+                  motoruGuncelle({ ffmpegPath: e.target.value });
+                  setFfmpeg(null);
+                }}
+                placeholder="otomatik bul"
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <button
+                className="button"
+                onClick={ffmpegSina}
+                disabled={ffmpegSinaniyor}
+                title="Bu yolda çalışan bir ffmpeg var mı?"
+              >
+                {ffmpegSinaniyor ? 'Sınanıyor…' : 'Sına'}
+              </button>
+            </div>
+          </label>
+
+          {ffmpeg !== null && (
+            <p
+              className="field-hint"
+              style={{ color: ffmpeg === 'yok' ? 'var(--warning)' : 'var(--ok)' }}
+            >
+              {ffmpeg === 'yok'
+                ? 'Bu yolda çalışan bir ffmpeg yok. Video yine iniyor; yalnızca .mp4 dönüşümü ve ses birleştirme yapılamıyor.'
+                : `Bulundu: ${ffmpeg.version}`}
+            </p>
+          )}
+
+          <label className="field row">
+            <span>
+              Varsayılan kalite
+              <br />
+              <span className="field-hint">
+                Yeni indirme penceresinde işaretli gelen seçenek; orada tek tek
+                değiştirilebiliyor. Seçilen sınırın altında hiç kalite yoksa en
+                düşüğü iniyor.
+              </span>
+            </span>
+            <select
+              className="select"
+              style={{ width: 160 }}
+              value={taslak.engine.mediaQuality}
+              onChange={(e) => motoruGuncelle({ mediaQuality: e.target.value })}
+            >
+              <option value="best">En yüksek</option>
+              <option value="1080">En fazla 1080p</option>
+              <option value="720">En fazla 720p</option>
+              <option value="480">En fazla 480p</option>
+              <option value="worst">En düşük</option>
+            </select>
+          </label>
+
+          <label className="field row">
+            <span>
+              Ses dili
+              <br />
+              <span className="field-hint">
+                Birden çok ses parçası olan yayınlarda tercih edilecek dil
+                (<code>tr</code>, <code>en</code>…). Boşsa manifestin varsayılanı.
+              </span>
+            </span>
+            <input
+              className="text-input"
+              style={{ width: 100 }}
+              value={taslak.engine.mediaLanguage}
+              onChange={(e) => motoruGuncelle({ mediaLanguage: e.target.value })}
+              placeholder="varsayılan"
+              spellCheck={false}
+              autoComplete="off"
+            />
+          </label>
+
+          <label className="field row">
+            <span>
+              Eşzamanlı parça
+              <br />
+              <span className="field-hint">
+                Bir videonun kaç parçası aynı anda insin. Host kotasını aşamıyor.
+              </span>
+            </span>
+            <input
+              className="text-input"
+              style={{ width: 80 }}
+              type="number"
+              min={1}
+              max={16}
+              value={taslak.engine.mediaConcurrency}
+              onChange={(e) => motoruGuncelle({ mediaConcurrency: Number(e.target.value) })}
             />
           </label>
 

@@ -12,7 +12,10 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   AppSettings,
   DownloadSnapshot,
+  FfmpegInfo,
   ManagerConfig,
+  MediaInfo,
+  MediaSelection,
   ServerCapabilities,
   UpdateInfo,
 } from './types';
@@ -37,6 +40,37 @@ export function startDownload(url: string, directory?: string): Promise<string> 
 
 export function listDownloads(): Promise<DownloadSnapshot[]> {
   return invoke<DownloadSnapshot[]>('list_downloads');
+}
+
+/**
+ * Akış manifestini (m3u8 / mpd) okuyup kalite seçeneklerini döner.
+ *
+ * `probeUrl`den ayrı: orası sunucu yeteneklerini soruyor, burada manifest
+ * indirilip ayrıştırılıyor ve ffmpeg'in varlığı da kontrol ediliyor.
+ */
+export function probeMedia(url: string): Promise<MediaInfo> {
+  return invoke<MediaInfo>('probe_media', { url });
+}
+
+/** Akış indirmesini kullanıcının kalite/ses seçimiyle başlatır. */
+export function startMediaDownload(
+  url: string,
+  options: { directory?: string; selection?: MediaSelection; fileName?: string } = {},
+): Promise<string> {
+  return invoke<string>('start_media_download', {
+    url,
+    directory: options.directory ?? null,
+    selection: options.selection ?? null,
+    fileName: options.fileName ?? null,
+  });
+}
+
+/**
+ * ffmpeg bulunuyor mu? `path` verilirse yalnızca o deneniyor — ayarlarda
+ * yazılan yolu kaydetmeden sınamak için.
+ */
+export function ffmpegStatus(path?: string): Promise<FfmpegInfo | null> {
+  return invoke<FfmpegInfo | null>('ffmpeg_status', { path: path ?? null });
 }
 
 /**

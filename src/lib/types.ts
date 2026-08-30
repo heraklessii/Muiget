@@ -11,6 +11,8 @@ export type DownloadStatus =
   | 'queued'
   | 'probing'
   | 'running'
+  /** Yalnızca akış indirmelerinde: parçalar indi, ffmpeg birleştiriyor. */
+  | 'merging'
   | 'paused'
   | 'completed'
   | 'failed'
@@ -24,6 +26,72 @@ export interface SegmentSnapshot {
   total: number;
   speed: number;
   active: boolean;
+}
+
+/** Akış protokolü. Rust tarafında `media::Protocol`. */
+export type MediaProtocol = 'hls' | 'dash';
+
+/**
+ * Bir akış indirmesinin ilerlemesi.
+ *
+ * Akışta ilerleme parça sayısıyla ölçülüyor: toplam boyut ancak son parça
+ * inince kesinleşiyor, o zamana kadar `estimated` doğru.
+ */
+export interface MediaProgress {
+  /** `HLS` ya da `DASH`. */
+  protocol: string;
+  /** Kalite etiketi (`1920x1080 · 5.0 Mbps`). */
+  label: string | null;
+  segmentsDone: number;
+  segmentsTotal: number;
+  estimated: boolean;
+  /** Ses ayrı iniyor; sonunda ffmpeg birleştirecek. */
+  merging: boolean;
+}
+
+/** Manifestteki bir kalite ya da ses seçeneği. */
+export interface TrackInfo {
+  id: string;
+  kind: 'muxed' | 'video' | 'audio';
+  /** Hazır etiket — arayüzün yeniden biçimlendirmesi gerekmiyor. */
+  label: string;
+  width: number | null;
+  height: number | null;
+  bandwidth: number;
+  codecs: string | null;
+  language: string | null;
+  name: string | null;
+}
+
+export interface FfmpegInfo {
+  path: string;
+  version: string;
+}
+
+/** `probe_media` sonucu — yeni indirme penceresinin gösterdiği her şey. */
+export interface MediaInfo {
+  protocol: MediaProtocol;
+  live: boolean;
+  durationSeconds: number | null;
+  video: TrackInfo[];
+  audio: TrackInfo[];
+  /** Ayarlardaki tercihle seçilecek parçalar — diyalog bunları işaretliyor. */
+  defaultVideo: string | null;
+  defaultAudio: string | null;
+  /** Varsayılan seçimde ses ayrı iniyor mu — yani ffmpeg şart mı? */
+  requiresFfmpeg: boolean;
+  ffmpeg: FfmpegInfo | null;
+  suggestedFileName: string;
+  /** Bant genişliği × süre. Gerçek boyut değil. */
+  estimatedSize: number;
+}
+
+/** Kullanıcının kalite/ses seçimi. Boş alanlar ayarlardaki tercihe düşüyor. */
+export interface MediaSelection {
+  video?: string | null;
+  audio?: string | null;
+  /** Sesi hiç indirme — ffmpeg yokken tek çıkış yolu. */
+  videoOnly?: boolean;
 }
 
 export interface DownloadSnapshot {
@@ -40,6 +108,8 @@ export interface DownloadSnapshot {
   error: string | null;
   warning: string | null;
   supportsRanges: boolean;
+  /** Doluysa bu bir akış (HLS/DASH) indirmesi. */
+  media: MediaProgress | null;
   createdAt: number;
   completedAt: number | null;
 }
@@ -88,6 +158,14 @@ export interface ManagerConfig {
   readTimeoutSecs: number;
   /** Vekil sunucu. Boş = doğrudan bağlantı. `http://`, `socks5://`… */
   proxy: string;
+  /** ffmpeg yolu. Boşsa uygulamanın yanına, sonra `PATH`e bakılıyor. */
+  ffmpegPath: string;
+  /** Varsayılan kalite: `best` | `worst` | `1080` | `720`… */
+  mediaQuality: string;
+  /** Ses dili tercihi (`tr`, `en`). Boşsa manifestin varsayılanı. */
+  mediaLanguage: string;
+  /** Aynı anda kaç video parçası insin. */
+  mediaConcurrency: number;
 }
 
 export interface AppSettings {
@@ -108,7 +186,24 @@ export interface AppSettings {
 
 /** Bir indirmenin hâlâ iş yapıyor olup olmadığı. */
 export function isActive(status: DownloadStatus): boolean {
-  return status === 'queued' || status === 'probing' || status === 'running';
+  return (
+    status === 'queued' ||
+    status === 'probing' ||
+    status === 'running' ||
+    status === 'merging'
+  );
+}
+
+/**
+ * Adres bir akış manifestine benziyor mu?
+ *
+ * Yalnızca ön eleme: kesin karar Rust tarafında, içerik türüne de bakılarak
+ * veriliyor (`media::detect`). Burada tek amaç, `.m3u8`/`.mpd` yazan kullanıcıya
+ * kalite seçeneklerini gösterecek ikinci bir istek atmak.
+ */
+export function looksLikeStream(url: string): boolean {
+  const yol = url.split(/[?#]/)[0].toLowerCase();
+  return yol.endsWith('.m3u8') || yol.endsWith('.m3u') || yol.endsWith('.mpd');
 }
 
 export function isResumable(status: DownloadStatus): boolean {

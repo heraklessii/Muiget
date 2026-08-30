@@ -26,7 +26,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::throttle::{host_of, HostLimiter, RateLimiter};
 use super::writer::SegmentWriter;
-use super::{DownloadError, Result};
+// Hangi hatanın yeniden denemeye değdiği kararı motorun kökünde duruyor:
+// akış (HLS/DASH) boru hattı da aynı kuralı kullanıyor (bkz. `media::pipeline`).
+use super::{yeniden_denenebilir, DownloadError, Result};
 
 /// Worker'ın yöneticiye gönderdiği olaylar.
 #[derive(Debug, Clone)]
@@ -326,28 +328,6 @@ fn geri_cekilme(config: &WorkerConfig, attempt: u32) -> Duration {
         .retry_base_delay
         .saturating_mul(kat)
         .min(config.max_retry_delay)
-}
-
-/// Hangi hatalar yeniden denemeye değer?
-///
-/// Kural: geçici olabilecek her şey denenir. Kalıcı olduğu belli olanlar
-/// (iptal, 4xx istemci hatası, bozuk yazma) denenmez — 5 kere aynı 404'ü almak
-/// kullanıcıyı sadece bekletir.
-fn yeniden_denenebilir(error: &DownloadError) -> bool {
-    match error {
-        DownloadError::Cancelled | DownloadError::Paused => false,
-        DownloadError::RangeIgnored { .. } => false,
-        DownloadError::InvalidUrl(_) | DownloadError::Meta(_) | DownloadError::NotFound(_) => false,
-        DownloadError::HttpStatus { status } => {
-            // 408 (timeout) ve 429 (çok fazla istek) geçici; diğer 4xx kalıcı.
-            matches!(status, 408 | 429) || *status >= 500
-        }
-        DownloadError::Io(e) => !matches!(
-            e.kind(),
-            std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound
-        ),
-        DownloadError::Network(_) | DownloadError::Other(_) => true,
-    }
 }
 
 #[cfg(test)]

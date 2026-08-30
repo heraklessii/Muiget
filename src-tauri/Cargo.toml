@@ -23,7 +23,9 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time"] }
+# `process`: ffmpeg cagrisi icin (media/mux.rs). Yalnizca istege bagli
+# birlestirmede kullaniliyor; ffmpeg yoksa hic calistirilmiyor.
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time", "process"] }
 futures-util = "0.3.34"
 thiserror = "2.0.20"
 uuid = { version = "1.20.0", features = ["v4", "serde"] }
@@ -43,6 +45,14 @@ reqwest = { version = "0.12", default-features = false, features = ["stream", "r
 sha2 = "0.10"
 md-5 = "0.10"
 
+# HLS'in `METHOD=AES-128` parca sifrelemesini cozmek icin (karar #25).
+# Anahtar manifestin gosterdigi adresten herkese acik veriliyor; burada
+# atlatilan bir koruma yok. DRM (SAMPLE-AES / Widevine / PlayReady) ayristirma
+# aninda reddediliyor - bkz. src/media/crypt.rs.
+# Ayni RustCrypto ailesinden, saf Rust, sistem bagimliligi yok.
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
@@ -60,3 +70,7 @@ tauri-plugin-clipboard-manager = "2"
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time", "net"] }
 tempfile = "3"
+# Ucdan uca akis testi sifreli HLS parcalari **uretmek** zorunda: cozme
+# tarafini gercekten sinamak icin fixture'in gercek AES-128-CBC olmasi gerek.
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }

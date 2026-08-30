@@ -84,6 +84,17 @@ pub enum DownloadError {
     #[error("resume meta dosyası okunamadı: {0}")]
     Meta(String),
 
+    /// Akış manifesti (m3u8 / MPD) okunamadı ya da beklenen biçimde değil.
+    /// Ayrı bir varyant: bu hatalar yeniden denemeyle düzelmiyor ve arayüzde
+    /// ağ hatasından farklı bir şey söylenmesi gerekiyor.
+    #[error("akış manifesti: {0}")]
+    Manifest(String),
+
+    /// DRM korumalı içerik. `CLAUDE.md`'deki kapsam sınırı gereği bilinçli
+    /// olarak desteklenmiyor; hata mesajı kullanıcıya bunu açıkça söylüyor.
+    #[error("{0}")]
+    Drm(String),
+
     /// Sunucu `Range` isteğini yok sayıp dosyanın tamamını göndermeye başladı.
     /// Segment #0 dışında bu ölümcül: yazmaya devam etmek dosyayı bozar.
     #[error("sunucu Range isteğini yok saydı (segment {segment})")]
@@ -111,6 +122,36 @@ impl Serialize for DownloadError {
 impl From<serde_json::Error> for DownloadError {
     fn from(e: serde_json::Error) -> Self {
         DownloadError::Meta(e.to_string())
+    }
+}
+
+/// Hangi hatalar yeniden denemeye değer?
+///
+/// Kural: geçici olabilecek her şey denenir. Kalıcı olduğu belli olanlar
+/// (iptal, 4xx istemci hatası, bozuk yazma, DRM) denenmez — 5 kere aynı 404'ü
+/// almak kullanıcıyı sadece bekletir.
+///
+/// Motorun kökünde duruyor çünkü iki boru hattı da aynı kuralı uyguluyor:
+/// [`worker`] tek dosyanın byte aralıklarını, [`crate::media::pipeline`] akış
+/// parçalarını indirirken. İki kopya tutmak, birine eklenen yeni bir hata
+/// türünün diğerinde unutulması demekti.
+pub fn yeniden_denenebilir(error: &DownloadError) -> bool {
+    match error {
+        DownloadError::Cancelled | DownloadError::Paused => false,
+        DownloadError::RangeIgnored { .. } => false,
+        DownloadError::InvalidUrl(_) | DownloadError::Meta(_) | DownloadError::NotFound(_) => false,
+        // Bozuk manifest ve DRM her denemede aynı sonucu verir; yanlış anahtarla
+        // çözülemeyen bir parça da öyle.
+        DownloadError::Manifest(_) | DownloadError::Drm(_) => false,
+        DownloadError::HttpStatus { status } => {
+            // 408 (timeout) ve 429 (çok fazla istek) geçici; diğer 4xx kalıcı.
+            matches!(status, 408 | 429) || *status >= 500
+        }
+        DownloadError::Io(e) => !matches!(
+            e.kind(),
+            std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound
+        ),
+        DownloadError::Network(_) | DownloadError::Other(_) => true,
     }
 }
 

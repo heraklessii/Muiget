@@ -749,3 +749,132 @@ süzgecinden geçiyor ve eşleşme arayüze olay olarak gidiyor. Varsayılan kap
 `…/test-dosyasi.zip` yakalandı; bir GitHub sayfa adresi ve düz metin bir parola
 **yakalanmadı** — süzgecin gerçekten dar olduğu, "parolam log'a düşer mi"
 sorusunun cevabıyla birlikte görüldü.
+
+---
+
+## #25 — HLS/DASH: Parçalar Bizim Kodumuzda, ffmpeg İsteğe Bağlı
+
+**Durum:** Kabul edildi
+
+**Bağlam:** IDM'i bugün satan özellik video yakalama. Sıradan bir dosyayı
+indirmek artık her tarayıcıda var; IDM'i kuran insanların çoğu bir sayfadaki
+videoyu almak için kuruyor. Muiget'in motoru, arayüzü ve uzantısı hazırdı ama
+akış videosu (HLS `.m3u8`, DASH `.mpd`) hiç desteklenmiyordu.
+
+Akış, motorun mevcut mantığına oturmuyor: orada "tek dosyanın N byte aralığı"
+var (karar #3), burada "N ayrı dosyanın tamamı". `docs/tasks.md` bu yüzden ilk
+kararı açıkça soruyordu: **ffmpeg dış bağımlılık olarak mı gelecek, yoksa
+birleştirme kendi kodumuzda mı yapılacak?**
+
+**Karar:** İkisi de. Manifest ayrıştırma, parça indirme, `AES-128` çözme ve
+parçaların uç uca eklenmesi tamamen bu projenin kodu (`src/media/`). ffmpeg
+**isteğe bağlı** ve yalnızca iki iş için çağrılıyor:
+
+1. MPEG-TS parçalarını `.mp4` kabına taşımak (`-c copy`, yeniden kodlama yok),
+2. **ayrı inen ses ile videoyu birleştirmek**.
+
+**Gerekçe:**
+
+- **Neden ffmpeg gömülmedi:** ffmpeg ikilisi ~70 MB ve LGPL/GPL matrisi
+  Apache-2.0 bir projenin dağıtımını karmaşıklaştırıyor. Kurulum paketini on
+  katına çıkarmak, kullanıcıların çoğunun hiç ihtiyaç duymadığı bir yetenek
+  için ağır bir bedel.
+- **Neden zorunlu da değil:** parçaları uç uca eklemek zaten oynatılabilir bir
+  dosya veriyor — MPEG-TS parçaları geçerli bir `.ts`, fMP4 parçaları (init
+  parçasıyla birlikte) geçerli bir `.mp4`. Yani ffmpeg'i şart koşmak,
+  kurulumu olmayan kullanıcıya çalışabilecek bir indirmeyi reddetmek olurdu.
+- **Neden ayrı ses ffmpeg'siz reddediliyor:** ses ve video ayrı iniyorsa
+  (DASH'in tamamı, HLS'in `#EXT-X-MEDIA` kullanan yayınları) birleştirme
+  kaçınılmaz. ffmpeg yoksa indirme **hiç başlamıyor** ve sebebi yazılıyor.
+  Alternatif — sessiz bir video dosyası teslim etmek — kullanıcının ancak
+  izlemeye başlayınca fark edeceği bir hata olurdu. Kontrol tek byte inmeden
+  yapılıyor; yüzlerce parçayı indirip sonunda birleştirememek bant genişliğini
+  çöpe atmak demekti. Kaçış yolu var: diyalogdan "yalnızca görüntü".
+- **Neden `.ts` de `.mp4`e çevriliyor:** ffmpeg varken. `.ts` dosyaları
+  Windows'ta çift tıklanınca çoğu zaman açılmıyor ve telefona atılamıyor.
+  Dönüşüm yeniden kodlama değil, saniyeler süren bir kap değişimi.
+
+**AES-128 destekleniyor, DRM desteklenmiyor.** HLS'in `METHOD=AES-128` kipinde
+anahtar, manifestin gösterdiği adresten **herkese açık** veriliyor; tarayıcıdaki
+oynatıcı da tam olarak bunu yapıyor. Burada atlatılan bir koruma yok ve
+desteklenmemesi hâlinde sıradan bir video sitesinin yarısı inmezdi. Buna
+karşılık `SAMPLE-AES` (FairPlay), Widevine ve PlayReady **ayrıştırma anında**
+reddediliyor — orada anahtar bir lisans sunucusundan cihaz kimliğiyle alınıyor
+ve onu aşmak `CLAUDE.md`'deki kapsam sınırının dışına çıkmak olurdu. Ret
+mesajı sebebi açıkça söylüyor; sessizce başarısız olmuyor.
+
+**Canlı yayın reddediliyor.** `#EXT-X-ENDLIST` yoksa (ya da MPD
+`type="dynamic"` ise) akışın sonu belli değil, dolayısıyla indirmenin de sonu
+olmaz. Kayıt bambaşka bir özellik; "indirme" gibi görünen ama hiç bitmeyen bir
+satır kullanıcıya bozuk bir uygulama izlenimi verirdi.
+
+**Paralel indir, sıralı yaz.** Parçalar `futures_util`in `buffered(N)`i ile
+paralel iniyor ama sonuçlar **manifest sırasında** teslim ediliyor; çıktı
+dosyası sıralı büyüyor. Ayrı bir sıralama tamponu ya da geçici dosya
+gerekmiyor, bellek N parçayla sınırlı. `download::worker`in sparse yazma
+yaklaşımı burada kullanılamazdı: bir parçanın dosyadaki yeri ancak kendinden
+öncekilerin boyu bilinince belli oluyor.
+
+**Devam etme tek sayıya indi.** Yazma sıralı olduğu için devam noktası "kaç
+parça tamamlandı" + "dosya kaç byte". Devam ederken dosya o boya **kırpılıyor**:
+uygulama meta yazmadan çöktüyse fazladan kalmış son parça böyle atılıyor.
+Kırpmasaydık aynı parça iki kez yazılır ve video sessizce bozulurdu.
+
+**Bağımlılık eklendi:** `aes` + `cbc` (RustCrypto, saf Rust, sistem bağımlılığı
+yok, proje zaten aynı ailenin `sha2`/`md-5`ini kullanıyor). AES'i elle yazmak
+gözden geçirilmemiş bir blok şifre bırakırdı. XML okuyucu ise **eklenmedi**:
+DASH'in ihtiyacı olan yüzey dar ve tek kullanıcısı için `quick-xml` ağacını
+getirmek bu projenin ölçütüne uymuyordu (`media/xml.rs`, ~250 satır, testli).
+
+**Ayarlarda bir yol yazılıysa yalnızca o deneniyor.** ffmpeg araması boşken
+uygulamanın yanına, sonra `PATH`e bakıyor; kullanıcı bir yol yazdıysa
+PATH'tekine sessizce düşmüyor. Yazdığı ffmpeg çalışmıyorsa bunu görmesi
+gerekiyor — başka bir sürümün arkasında saklanması değil. (Yan fayda: testler
+"ffmpeg yok" durumunu makineden bağımsız kurabiliyor.)
+
+**Ne test edildi:** 16 uçtan uca test yerel bir HTTP sunucusuna karşı koşuyor —
+sıralı birleştirme, master playlistten kalite seçimi, `AES-128` çözme (fixture
+gerçekten şifreleniyor), fMP4 init parçası, duraklat/devam ederken parçaların
+**yeniden indirilmemesi**, canlı ve DRM reddi, eksik parçada başarısızlık.
+ffmpeg entegrasyonu sahte bir ffmpeg betiğiyle sınanıyor: gerçek ffmpeg her
+makinede yok ve olsa bile testi onun sürümüne bağlamak sonucu değişken yapardı;
+sınanan şey ffmpeg değil, etrafındaki bulma/çağırma/taşıma/temizleme zinciri.
+
+**Gerçek pencerede doğrulandı:** yerelde beş parçalık bir VOD playlisti
+kaldırılıp uygulamaya köprünün kullandığı `--add` argümanıyla verildi. Sunucu
+günlüğü parçaların **paralel** istendiğini gösteriyor (`s4`, `s3`ten önce
+geldi); çıktı dosyasının SHA-256'sı beklenen birleşimle birebir aynı. Yani
+"paralel indir, sırayla yaz" sözü test ortamında değil uygulamanın kendisinde
+tutuyor. ffmpeg bu makinede kurulu olmadığı için dosya `.ts` kaldı — beklenen.
+
+---
+
+## #26 — Uzantıda Video Yakalama: `webRequest`, İsteğe Bağlı ve Kapalı
+
+**Durum:** Kabul edildi
+
+**Bağlam:** Uzantının sayfa taraması DOM'a bakıyor (karar: kalıcı content
+script yok). HLS/DASH manifestinin adresi ise sayfanın HTML'inde **hiç
+geçmiyor** — oynatıcı JavaScript'i çalışırken isteniyor. Yani DOM taraması bu
+videoları tanım gereği bulamaz.
+
+**Karar:** `webRequest` **isteğe bağlı** izin olarak eklendi (varsayılan
+kapalı). Açıldığında arka plan `.m3u8`/`.mpd` isteklerini görüp sekme başına
+`storage.session`de biriktiriyor; popup o listeyi gösteriyor.
+
+**Gerekçe:**
+- **Neden isteğe bağlı:** izin verildiğinde uzantı gezilen her sayfanın ağ
+  isteklerinin adreslerini görüyor. Bu ağır bir yetki ve kurulumda sessizce
+  istenmemeli — aynı ölçüt `downloads` ve `cookies` izinlerinde de uygulandı.
+  Chrome'un izin kutusu zaten kullanıcıya ne verdiğini söylüyor; anahtar da
+  aynı cümleyi yazıyor.
+- **Neden `storage.session`:** liste tarayıcı kapanınca siliniyor ve diske
+  yazılmıyor. Sekme kapanınca ya da sayfa değişince o sekmenin kaydı düşüyor;
+  önceki sayfanın videosunu göstermek kullanıcıyı yanıltırdı.
+- **Süzgeçten geçmeyen hiçbir adres kaydedilmiyor.** Dinleyici her isteği
+  görüyor ama yalnızca manifest desenine uyanlar saklanıyor.
+- **Rozet sekmeye özel** (`setBadgeText({tabId})`): indirme gönderiminde
+  kullanılan geçici genel rozetlerle çakışmıyor.
+- Uzantı dosya adı **göndermiyor**: bir manifestin adı (`master.m3u8`) diskte
+  `master.mp4` olurdu. Masaüstü tarafı adı manifest adresinden türetiyor ve
+  `master`/`index` gibi anlamsız gövdeleri atlıyor.

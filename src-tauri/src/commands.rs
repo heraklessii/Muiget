@@ -69,6 +69,97 @@ pub fn start_download(
     state.manager.start(url, hedef)
 }
 
+/// Akış manifestini (m3u8 / MPD) okuyup kalite seçeneklerini döner (karar #25).
+///
+/// Ayrı bir komut: [`probe_url`] sunucu yeteneklerini soruyor, burada ise
+/// manifest indirilip ayrıştırılıyor. Arayüz `.m3u8`/`.mpd` gördüğünde ya da
+/// `probe_url` akış içerik türü döndürdüğünde bunu çağırıyor.
+#[tauri::command]
+pub async fn probe_media(state: State<'_, AppState>, url: String) -> Result<crate::media::MediaInfo> {
+    use crate::media;
+
+    let ayarlar = state.settings_snapshot();
+    let (temiz, basliklar) = akis_basliklari(&url);
+    let client = crate::download::http::build_client(
+        &ayarlar.engine.user_agent,
+        std::time::Duration::from_secs(ayarlar.engine.connect_timeout_secs),
+        Some(ayarlar.engine.proxy.as_str()),
+    )?;
+
+    let protokol = media::detect(&temiz, None).ok_or_else(|| {
+        DownloadError::Manifest("adres bir m3u8 ya da mpd manifestine benzemiyor".into())
+    })?;
+
+    let metin = media::fetch_text(&client, &temiz, &basliklar).await?;
+    let manifest = media::parse(protokol, &metin, &temiz)?;
+    let ffmpeg = media::mux::detect(&ayarlar.engine.ffmpeg_path).await;
+    let dil = Some(ayarlar.engine.media_language.trim()).filter(|d| !d.is_empty());
+
+    media::describe(
+        &client,
+        &manifest,
+        media::Quality::parse(&ayarlar.engine.media_quality),
+        dil,
+        &basliklar,
+        ffmpeg,
+    )
+    .await
+}
+
+/// Akış indirmesini kullanıcının kalite/ses seçimiyle başlatır.
+#[tauri::command]
+pub fn start_media_download(
+    state: State<'_, AppState>,
+    url: String,
+    directory: Option<String>,
+    selection: Option<crate::media::MediaSelection>,
+    file_name: Option<String>,
+) -> Result<String> {
+    let hedef = directory
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.settings_snapshot().download_dir);
+
+    let secenekler = crate::download::DownloadOptions {
+        headers: Vec::new(),
+        file_name: file_name.filter(|a| !a.trim().is_empty()),
+    };
+
+    state
+        .manager
+        .start_media(url, hedef, secenekler, selection.unwrap_or_default())
+}
+
+/// ffmpeg bulunuyor mu? Ayarlar penceresi bunu "bulundu / bulunamadı" olarak
+/// gösteriyor; kullanıcı yolu yazdıktan sonra doğrulayabilsin diye var.
+#[tauri::command]
+pub async fn ffmpeg_status(
+    state: State<'_, AppState>,
+    path: Option<String>,
+) -> Result<Option<crate::media::mux::FfmpegInfo>> {
+    let yol = match path {
+        Some(p) => p,
+        None => state.settings_snapshot().engine.ffmpeg_path,
+    };
+    Ok(crate::media::mux::detect(&yol).await)
+}
+
+/// Adresteki kimlik bilgisini ayırıp `Authorization` başlığına taşır.
+///
+/// Manifest, parça ve şifreleme anahtarı isteklerinin hepsi aynı başlıkları
+/// taşımak zorunda: korumalı bir yayında anahtar da korumalı oluyor.
+fn akis_basliklari(url: &str) -> (String, Vec<(String, String)>) {
+    let (temiz, kimlik) = crate::download::http::split_credentials(url);
+    let basliklar = kimlik
+        .map(|(k, p)| {
+            vec![(
+                "Authorization".to_string(),
+                crate::download::http::basic_auth_value(&k, &p),
+            )]
+        })
+        .unwrap_or_default();
+    (temiz, basliklar)
+}
+
 #[tauri::command]
 pub fn list_downloads(state: State<'_, AppState>) -> Vec<DownloadSnapshot> {
     state.manager.list()

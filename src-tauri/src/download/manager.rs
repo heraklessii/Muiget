@@ -32,6 +32,7 @@ use super::throttle::{self, BandwidthRule, HostLimiter, RateLimiter};
 use super::worker::{self, SegmentContext, WorkerConfig, WorkerEvent};
 use super::writer;
 use super::{DownloadError, Result};
+use crate::media;
 
 /// Arayüzün ilerleme yenileme aralığı. Daha sık göndermek CPU'yu boşa yakıyor,
 /// daha seyrek göndermek hız göstergesini tembel gösteriyor.
@@ -48,6 +49,11 @@ pub enum DownloadStatus {
     Queued,
     Probing,
     Running,
+    /// Yalnızca akış indirmelerinde: parçalar indi, ffmpeg ses ile videoyu
+    /// birleştiriyor. Ayrı bir durum çünkü bu aşamada ağ trafiği yok ve
+    /// ilerleme çubuğu ilerlemiyor — "Çalışıyor" göstermek takılmış izlenimi
+    /// verirdi.
+    Merging,
     Paused,
     Completed,
     Failed,
@@ -56,7 +62,13 @@ pub enum DownloadStatus {
 
 impl DownloadStatus {
     pub fn is_active(&self) -> bool {
-        matches!(self, DownloadStatus::Queued | DownloadStatus::Probing | DownloadStatus::Running)
+        matches!(
+            self,
+            DownloadStatus::Queued
+                | DownloadStatus::Probing
+                | DownloadStatus::Running
+                | DownloadStatus::Merging
+        )
     }
 
     /// Devam ettirilebilir mi? Tamamlanan ve iptal edilen indirmeler hariç.
@@ -77,6 +89,26 @@ pub struct SegmentSnapshot {
     pub active: bool,
 }
 
+/// Akış indirmesinin arayüze giden ilerlemesi.
+///
+/// Sıradan indirmede ilerleme byte'larla ölçülüyor; akışta parça sayısı daha
+/// anlamlı, çünkü toplam boyut ancak son parça inince kesinleşiyor. İkisi de
+/// gösteriliyor: çubuk byte tahminiyle, altındaki satır "128/430 parça" ile.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaProgress {
+    /// `HLS` ya da `DASH`.
+    pub protocol: String,
+    /// Kalite etiketi (`1920x1080 · 5.0 Mbps`).
+    pub label: Option<String>,
+    pub segments_done: usize,
+    pub segments_total: usize,
+    /// Toplam boyut hâlâ tahmin mi? İndirme bitince `false` oluyor.
+    pub estimated: bool,
+    /// Ses ayrı iniyor ve sonunda ffmpeg ile birleştirilecek.
+    pub merging: bool,
+}
+
 /// Arayüze giden tam durum. Her tick'te yeniden üretiliyor.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +127,8 @@ pub struct DownloadSnapshot {
     /// Ölümcül olmayan uyarı (ör. sunucu doğrulayıcı vermiyor).
     pub warning: Option<String>,
     pub supports_ranges: bool,
+    /// Doluysa bu bir akış (HLS/DASH) indirmesi.
+    pub media: Option<MediaProgress>,
     pub created_at: u64,
     pub completed_at: Option<u64>,
 }
@@ -147,6 +181,25 @@ pub struct ManagerConfig {
     /// `serde(default)` eski `settings.json` dosyaları için.
     #[serde(default)]
     pub proxy: String,
+
+    // --- Akış (HLS/DASH) ayarları, karar #25 ---
+    /// ffmpeg'in yolu. Boşsa uygulamanın yanına, sonra `PATH`e bakılıyor.
+    #[serde(default)]
+    pub ffmpeg_path: String,
+    /// Varsayılan kalite tercihi: `best` | `worst` | `1080` | `720`…
+    /// Kullanıcı diyalogda açıkça bir kalite seçerse o kazanıyor.
+    #[serde(default = "varsayilan_kalite")]
+    pub media_quality: String,
+    /// Ses parçası tercihi (`tr`, `en`…). Boşsa manifestin varsayılanı.
+    #[serde(default)]
+    pub media_language: String,
+    /// Aynı anda kaç video parçası insin.
+    ///
+    /// Ayrı bir alan: akışta parçalar küçük (birkaç MB) ve çok sayıda, yani
+    /// paralellik dosya segmentlerinden farklı bir noktada doyuyor. Host
+    /// kotası burada da geçerli, bu değer onun üstüne çıkamıyor.
+    #[serde(default = "varsayilan_akis_paralelligi")]
+    pub media_concurrency: usize,
 }
 
 impl Default for ManagerConfig {
@@ -166,6 +219,10 @@ impl Default for ManagerConfig {
             connect_timeout_secs: 15,
             read_timeout_secs: 30,
             proxy: String::new(),
+            ffmpeg_path: String::new(),
+            media_quality: varsayilan_kalite(),
+            media_language: String::new(),
+            media_concurrency: varsayilan_akis_paralelligi(),
         }
     }
 }
@@ -174,6 +231,18 @@ impl Default for ManagerConfig {
 /// geliyor ki alan eksikken 0 (= sınırsız) okunmasın.
 fn varsayilan_es_zamanli() -> usize {
     3
+}
+
+/// Varsayılan olarak en yüksek kalite. IDM de kullanıcıya sormadan en iyisini
+/// alıyor ve "indirdiğim video düşük çözünürlüklü çıktı" en can sıkıcı sonuç.
+fn varsayilan_kalite() -> String {
+    "best".to_string()
+}
+
+/// Altı eşzamanlı parça. Daha fazlası CDN'lerde 429 riskini artırıyor, daha azı
+/// küçük parçalarda bağlantı kurma gecikmesini gizleyemiyor.
+fn varsayilan_akis_paralelligi() -> usize {
+    6
 }
 
 /// İndirmeye özgü seçenekler motorun kökünde tanımlı: resume metası da onları
@@ -279,8 +348,59 @@ struct EntryState {
     stop_reason: Option<StopReason>,
     /// Doluysa: indirme kuyrukta, süpervizörü henüz başlamadı.
     pending: Option<PendingStart>,
+    /// Doluysa bu bir akış indirmesi ve ilerleme parçalarla ölçülüyor.
+    media: Option<MediaState>,
     created_at: u64,
     completed_at: Option<u64>,
+}
+
+/// Akış indirmesinin çalışma zamanı ilerlemesi.
+///
+/// `EntryState.segments` akışta kullanılmıyor: orası "tek dosyanın byte
+/// aralıkları" demek ve akışta öyle bir yapı yok. Bunun yerine sayaçlar burada
+/// tutuluyor ve `snapshot` ilerlemeyi buradan üretiyor.
+#[derive(Debug, Clone, Default)]
+struct MediaState {
+    protocol: String,
+    label: Option<String>,
+    video_done: usize,
+    video_total: usize,
+    video_bytes: u64,
+    audio_done: usize,
+    audio_total: usize,
+    audio_bytes: u64,
+    /// Ses ayrı iniyor: sonunda ffmpeg birleştirmesi var.
+    merge: bool,
+    /// Toplam boyut hâlâ tahmin mi?
+    estimated: bool,
+}
+
+impl MediaState {
+    fn done(&self) -> usize {
+        self.video_done + self.audio_done
+    }
+
+    fn total(&self) -> usize {
+        self.video_total + self.audio_total
+    }
+
+    fn bytes(&self) -> u64 {
+        self.video_bytes + self.audio_bytes
+    }
+
+    /// Toplam boyutu inen parçalardan tahmin eder.
+    ///
+    /// Manifest byte değil **süre** veriyor; ilk tahmin bant genişliğinden
+    /// geliyor ve kabaca tutuyor. İnen parçalar arttıkça ortalama parça boyu
+    /// gerçek ölçüme dayanıyor, yani tahmin indirme ilerledikçe kendini
+    /// düzeltiyor. Hiç parça inmemişse çağıran ilk tahmini koruyor.
+    fn tahmini_boyut(&self) -> Option<u64> {
+        let inen = self.done();
+        if inen == 0 || self.total() == 0 {
+            return None;
+        }
+        Some((self.bytes() as f64 / inen as f64 * self.total() as f64) as u64)
+    }
 }
 
 #[derive(Debug)]
@@ -290,6 +410,9 @@ struct Entry {
     /// İndirmeye özgü başlıklar ve ad ezmesi. Duraklat/devam et arasında
     /// korunuyor: `Referer` olmadan devam etmek 403 alırdı.
     options: DownloadOptions,
+    /// Akış indirmesiyse kullanıcının kalite/dil seçimi. Sıradan indirmelerde
+    /// boş; adres bir manifest çıkmazsa hiç bakılmıyor.
+    selection: media::MediaSelection,
     state: Mutex<EntryState>,
 }
 
@@ -311,7 +434,22 @@ impl Entry {
             })
             .collect();
 
-        let downloaded: u64 = segments.iter().map(|s| s.downloaded).sum();
+        // Akışta ilerleme parça sayaçlarından geliyor; byte aralığı yok.
+        let (downloaded, segments, media) = match &state.media {
+            Some(m) => (
+                m.bytes(),
+                Vec::new(),
+                Some(MediaProgress {
+                    protocol: m.protocol.clone(),
+                    label: m.label.clone(),
+                    segments_done: m.done(),
+                    segments_total: m.total(),
+                    estimated: m.estimated,
+                    merging: m.merge,
+                }),
+            ),
+            None => (segments.iter().map(|s| s.downloaded).sum(), segments, None),
+        };
         let kalan = state.total_size.saturating_sub(downloaded);
 
         DownloadSnapshot {
@@ -332,6 +470,7 @@ impl Entry {
             error: state.error.clone(),
             warning: state.warning.clone(),
             supports_ranges: state.supports_ranges,
+            media,
             created_at: state.created_at,
             completed_at: state.completed_at,
         }
@@ -560,6 +699,31 @@ impl DownloadManager {
         directory: PathBuf,
         options: DownloadOptions,
     ) -> Result<String> {
+        self.start_full(url, directory, options, media::MediaSelection::default())
+    }
+
+    /// Akış indirmesi başlatır — kullanıcının kalite/dil seçimiyle.
+    ///
+    /// Ayrı bir kapı gerekmiyordu aslında: adres bir manifest ise
+    /// [`start`](Self::start) da akış yoluna giriyor. Bu, yalnızca **seçim**
+    /// taşıyabilmek için var; seçim yoksa ayarlardaki tercih uygulanıyor.
+    pub fn start_media(
+        &self,
+        url: String,
+        directory: PathBuf,
+        options: DownloadOptions,
+        selection: media::MediaSelection,
+    ) -> Result<String> {
+        self.start_full(url, directory, options, selection)
+    }
+
+    fn start_full(
+        &self,
+        url: String,
+        directory: PathBuf,
+        options: DownloadOptions,
+        selection: media::MediaSelection,
+    ) -> Result<String> {
         if !(url.starts_with("http://") || url.starts_with("https://")) {
             return Err(DownloadError::InvalidUrl(url));
         }
@@ -597,6 +761,7 @@ impl DownloadManager {
             id: id.clone(),
             url: url.clone(),
             options: options.clone(),
+            selection,
             state: Mutex::new(EntryState {
                 status: DownloadStatus::Queued,
                 file_name: baslangic_adi,
@@ -612,6 +777,7 @@ impl DownloadManager {
                 cancel: None,
                 stop_reason: None,
                 pending: Some(PendingStart { directory, fresh: true }),
+                media: None,
                 created_at: unix_now(),
                 completed_at: None,
             }),
@@ -778,10 +944,29 @@ impl DownloadManager {
                 continue;
             }
 
+            // Akış indirmeleri de diskten geri geliyor: sayaçlar metadaki
+            // devam noktasından kuruluyor, yoksa liste "0 parça" gösterip
+            // kullanıcıya indirmenin baştan başlayacağını düşündürürdü.
+            let media_state = meta.media.as_ref().map(|m| MediaState {
+                protocol: m.protocol.to_ascii_uppercase(),
+                label: m.label.clone(),
+                video_done: m.video_done,
+                video_total: m.video_total,
+                video_bytes: m.video_bytes,
+                audio_done: m.audio_done,
+                audio_total: m.audio_total,
+                audio_bytes: m.audio_bytes,
+                merge: m.merge,
+                estimated: true,
+            });
+
             let entry = Arc::new(Entry {
                 id: meta.id.clone(),
                 url: meta.url.clone(),
                 options: meta.options.clone(),
+                // Seçim metaya yazılmıyor; parça kimlikleri orada duruyor ve
+                // devam ederken onlar kullanılıyor (bkz. `supervise_media`).
+                selection: media::MediaSelection::default(),
                 state: Mutex::new(EntryState {
                     status: DownloadStatus::Paused,
                     file_name: meta.file_name.clone(),
@@ -796,6 +981,7 @@ impl DownloadManager {
                     cancel: None,
                     stop_reason: None,
                     pending: None,
+                    media: media_state,
                     created_at: meta.created_at,
                     completed_at: None,
                 }),
@@ -932,6 +1118,20 @@ impl DownloadManager {
             sonuc = http::probe_with(&client, &entry.url, &entry.options.headers) => sonuc?,
         };
 
+        // --- 1b. Bu bir akış manifesti mi? ---
+        //
+        // Karar yoklamadan **sonra** veriliyor çünkü uzantı yetmiyor: CDN'ler
+        // `.m3u8`i sorgu parametresinin arkasına saklıyor, bazıları da manifesti
+        // uzantısız veriyor. `Content-Type` ile birlikte bakmak ikisini de
+        // yakalıyor (bkz. `media::detect`).
+        if let Some(protocol) = media::detect(&caps.final_url, caps.content_type.as_deref())
+            .or_else(|| media::detect(&entry.url, None))
+        {
+            return self
+                .supervise_media(&entry, directory, fresh, &cancel, &client, &config, protocol, &hosts)
+                .await;
+        }
+
         // --- 2. Dosya adına ve hedef yola karar ver ---
         //
         // Uzantıdan bir ad geldiyse **o kazanıyor**: tarayıcı adı
@@ -1059,6 +1259,405 @@ impl DownloadManager {
 
         sonuc?;
         self.finalize(&entry, &part, &target).await
+    }
+
+    /// Akış (HLS/DASH) indirmesinin yaşam döngüsü.
+    ///
+    /// [`supervise`](Self::supervise)'ın ayrı bir dalı. Adım sırası benziyor ama
+    /// her adımın içi farklı: segment planı yerine manifest çözümü, sparse
+    /// yazma yerine sıralı ekleme, tek `.mgpart` yerine ses ve video için ayrı
+    /// parça dosyaları, sonunda da ffmpeg. Ortak olan her şey (kuyruk, host
+    /// kotası, hız sınırı, iptal, kayıt) paylaşılıyor.
+    #[allow(clippy::too_many_arguments)]
+    async fn supervise_media(
+        &self,
+        entry: &Arc<Entry>,
+        directory: PathBuf,
+        fresh: bool,
+        cancel: &CancellationToken,
+        client: &Client,
+        config: &ManagerConfig,
+        protocol: media::Protocol,
+        hosts: &Arc<HostLimiter>,
+    ) -> Result<()> {
+        use std::sync::atomic::AtomicBool;
+
+        use super::resume::MediaResume;
+        use media::pipeline::{FetchConfig, FetchContext, FetchEvent};
+
+        let headers = entry.options.headers.clone();
+
+        // --- 1. Manifesti indir ve çöz ---
+        let metin = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(DownloadError::Cancelled),
+            m = media::fetch_text(client, &entry.url, &headers) => m?,
+        };
+        let manifest = media::parse(protocol, &metin, &entry.url)?;
+
+        // --- 2. ffmpeg var mı, plan ne diyor ---
+        let ffmpeg = media::mux::detect(&config.ffmpeg_path).await;
+        let dil = Some(config.media_language.trim()).filter(|d| !d.is_empty());
+        let plan = media::build_plan(
+            client,
+            &manifest,
+            &entry.selection,
+            media::Quality::parse(&config.media_quality),
+            dil,
+            &headers,
+            ffmpeg.is_some(),
+        )
+        .await?;
+
+        // Ses ayrı iniyorsa ffmpeg olmadan tek dosya çıkmıyor. Kontrol indirme
+        // **başlamadan** yapılıyor: yüzlerce parçayı indirip sonunda
+        // birleştirememek kullanıcının zamanını ve bant genişliğini çöpe atardı.
+        if plan.needs_ffmpeg && ffmpeg.is_none() {
+            return Err(DownloadError::Other(
+                "Bu yayında ses ve görüntü ayrı iniyor; tek dosyada birleştirmek için ffmpeg \
+                 gerekiyor. ffmpeg kurup Ayarlar → ffmpeg yolunu doldurabilir ya da yeni indirme \
+                 penceresinde \"yalnızca video\" seçebilirsin."
+                    .into(),
+            ));
+        }
+
+        // --- 3. Dosya adı ve hedef yol ---
+        //
+        // Uzantıyı **plan** belirliyor (kap + ffmpeg'in varlığı); uzantıdan
+        // gelen ad varsa yalnızca gövdesi alınıyor. Yoksa tarayıcının verdiği
+        // `.m3u8` uzantısı video dosyasının adında kalırdı.
+        //
+        // Gövde `master`/`index` gibi bir şeyse yok sayılıyor: tarayıcı
+        // manifestin dosya adını gönderiyor ve kullanıcının diskinde
+        // `master.mp4` diye bir dosya belirmesi hiçbir şey anlatmıyor. Adresten
+        // türetilen ad (genelde bölüm/film adını taşıyan dizin) daha iyi.
+        let dosya_adi = entry
+            .options
+            .file_name
+            .as_deref()
+            .map(|ad| ad.rsplit_once('.').map(|(g, _)| g).unwrap_or(ad))
+            .map(http::sanitize_file_name)
+            .filter(|ad| !media::is_generic_stem(ad))
+            .map(|govde| {
+                let uzanti = plan.file_name.rsplit_once('.').map(|(_, u)| u).unwrap_or("mp4");
+                format!("{govde}.{uzanti}")
+            })
+            .unwrap_or_else(|| plan.file_name.clone());
+
+        let target = {
+            let mevcut = entry.state.lock().unwrap().target.clone();
+            if fresh {
+                let klasor = kategori_klasoru(&directory, &dosya_adi, config.categorize).await;
+                benzersiz_yol(&klasor, &dosya_adi, &entry.url).await
+            } else {
+                mevcut
+            }
+        };
+        if fresh {
+            if let Some(ad) = self.baska_kayit_ayni_hedefte(&entry.id, &target) {
+                return Err(DownloadError::Other(format!(
+                    "{ad} zaten listede; devam etmek için o satırdaki devam et düğmesini kullan"
+                )));
+            }
+        }
+
+        // Video parçası bilerek standart `.mgpart` adını kullanıyor: yarım bir
+        // akış indirmesinin üzerine başka bir indirmenin yazmasını önleyen
+        // çakışma kontrolü (`benzersiz_yol`) o ada bakıyor.
+        let video_part = writer::part_path(&target);
+        let audio_part = ek_part_yolu(&target, "audio");
+        let mux_part = ek_part_yolu(&target, "mux");
+
+        // --- 4. Devam noktası ---
+        let audio_id = plan.audio.as_ref().map(|a| a.id.clone());
+        let video_toplam = plan.video.segments.len();
+        let audio_toplam = plan.audio.as_ref().map_or(0, |a| a.segments.len());
+
+        let mut meta = ResumeMeta::load(&target).await.unwrap_or(None);
+        let devam = meta
+            .as_ref()
+            .and_then(|m| m.media.as_ref())
+            .filter(|m| {
+                m.matches(
+                    &plan.manifest_url,
+                    &plan.video.id,
+                    audio_id.as_deref(),
+                    video_toplam,
+                    audio_toplam,
+                )
+            })
+            .cloned();
+
+        let devam = match devam {
+            Some(d) => d,
+            None => {
+                // Uyuşmayan ya da hiç olmayan devam noktası: yarım dosyaları
+                // sil. Eskisinin üzerine eklemek sessizce bozuk video verirdi.
+                let _ = tokio::fs::remove_file(&video_part).await;
+                let _ = tokio::fs::remove_file(&audio_part).await;
+                let _ = tokio::fs::remove_file(&mux_part).await;
+                meta = None;
+                MediaResume {
+                    manifest_url: plan.manifest_url.clone(),
+                    protocol: plan.protocol.label().to_ascii_lowercase(),
+                    video_track: plan.video.id.clone(),
+                    audio_track: audio_id.clone(),
+                    video_total: video_toplam,
+                    audio_total: audio_toplam,
+                    video_done: 0,
+                    audio_done: 0,
+                    video_bytes: 0,
+                    audio_bytes: 0,
+                    merge: plan.needs_ffmpeg,
+                    label: Some(plan.video.label()),
+                }
+            }
+        };
+
+        let mut meta = meta.unwrap_or_else(|| {
+            ResumeMeta::for_media(
+                entry.id.clone(),
+                entry.url.clone(),
+                dosya_adi.clone(),
+                devam.clone(),
+            )
+        });
+        meta.options = entry.options.clone();
+
+        // --- 5. Durumu yaz ---
+        let uyari = if ffmpeg.is_none() && plan.container == media::Container::Ts {
+            Some(
+                "ffmpeg bulunamadı; video .ts olarak kaydedilecek. Çoğu oynatıcı açar, ama \
+                 .mp4 istiyorsan ffmpeg kurup Ayarlar'dan yolunu göster."
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+
+        {
+            let mut state = entry.state.lock().unwrap();
+            state.file_name = dosya_adi.clone();
+            state.target = target.clone();
+            state.resolved = true;
+            state.supports_ranges = false;
+            state.segments.clear();
+            state.warning = uyari;
+            state.total_size = plan.estimated_size.max(devam.bytes());
+            state.status = DownloadStatus::Running;
+            state.media = Some(MediaState {
+                protocol: plan.protocol.label().to_string(),
+                label: Some(plan.video.label()),
+                video_done: devam.video_done,
+                video_total: video_toplam,
+                video_bytes: devam.video_bytes,
+                audio_done: devam.audio_done,
+                audio_total: audio_toplam,
+                audio_bytes: devam.audio_bytes,
+                merge: plan.needs_ffmpeg,
+                estimated: true,
+            });
+        }
+        self.emit(entry);
+
+        // --- 6. Parçaları indir ---
+        //
+        // Paralellik host kotasının payını aşamıyor: aynı CDN'den iki video
+        // indirilirken ikisi de altı bağlantı açsaydı kota anlamsızlaşırdı
+        // (karar #17).
+        let pay = hosts.fair_share(&throttle::host_of(&entry.url));
+        let ctx = Arc::new(FetchContext {
+            client: client.clone(),
+            headers: headers.clone(),
+            rate: self.inner.rate.clone(),
+            hosts: hosts.clone(),
+            keys: Arc::new(media::crypt::KeyStore::new()),
+            cancel: cancel.clone(),
+            config: FetchConfig {
+                concurrency: config.media_concurrency.max(1).min(pay.max(1)),
+                max_retries: config.max_retries,
+                read_timeout: Duration::from_secs(config.read_timeout_secs),
+                ..FetchConfig::default()
+            },
+        });
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<FetchEvent>();
+        // Ses aşamasına geçildi mi? Parça olayları hangi sayaca yazılacağını
+        // bundan öğreniyor. Boru hattı hangi parçayı indirdiğini bilmiyor —
+        // bilmesi de gerekmiyor; sırayı burası kuruyor.
+        let ses_asamasi = Arc::new(AtomicBool::new(devam.video_done >= video_toplam));
+
+        let gorev = {
+            let ctx = ctx.clone();
+            let video = plan.video.clone();
+            let audio = plan.audio.clone();
+            let video_part = video_part.clone();
+            let audio_part = audio_part.clone();
+            let tx = tx.clone();
+            let asama = ses_asamasi.clone();
+            let (v_done, v_bytes) = (devam.video_done, devam.video_bytes);
+            let (a_done, a_bytes) = (devam.audio_done, devam.audio_bytes);
+
+            self.inner.runtime.spawn(async move {
+                if v_done < video.segments.len() {
+                    media::pipeline::download_track(&ctx, &video, &video_part, v_done, v_bytes, &tx)
+                        .await?;
+                }
+                if let Some(ses) = audio {
+                    asama.store(true, Ordering::Relaxed);
+                    if a_done < ses.segments.len() {
+                        media::pipeline::download_track(&ctx, &ses, &audio_part, a_done, a_bytes, &tx)
+                            .await?;
+                    }
+                }
+                Ok::<(), DownloadError>(())
+            })
+        };
+        drop(tx);
+
+        // --- 7. İlerleme döngüsü ---
+        let mut olcer = SpeedMeter::new(Instant::now());
+        let mut son_emit = Instant::now();
+        let mut son_meta = Instant::now();
+
+        loop {
+            let olay = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => None,
+                o = rx.recv() => o,
+            };
+            let Some(olay) = olay else { break };
+
+            match olay {
+                FetchEvent::Bytes(n) => olcer.record(n),
+                FetchEvent::SegmentWritten { index, written, .. } => {
+                    let mut state = entry.state.lock().unwrap();
+                    if let Some(m) = state.media.as_mut() {
+                        if ses_asamasi.load(Ordering::Relaxed) {
+                            m.audio_done = index + 1;
+                            m.audio_bytes = written;
+                        } else {
+                            m.video_done = index + 1;
+                            m.video_bytes = written;
+                        }
+                    }
+                }
+                FetchEvent::Retrying { index, attempt, error } => {
+                    log::warn!("akış parçası {index} yeniden deneniyor ({attempt}. deneme): {error}");
+                }
+            }
+
+            let simdi = Instant::now();
+            if simdi.duration_since(son_emit) >= TICK {
+                son_emit = simdi;
+                let hiz = olcer.sample_at(simdi);
+                {
+                    let mut state = entry.state.lock().unwrap();
+                    state.speed = hiz;
+                    if let Some(t) = state.media.as_ref().and_then(MediaState::tahmini_boyut) {
+                        state.total_size = t;
+                    }
+                }
+                self.emit(entry);
+            }
+            if simdi.duration_since(son_meta) >= META_INTERVAL {
+                son_meta = simdi;
+                self.persist_media(entry, &mut meta, &target).await;
+            }
+        }
+
+        let sonuc = gorev.await;
+        // Ne olursa olsun devam noktasını yaz: duraklatmanın ve çökme sonrası
+        // sürdürmenin tek dayanağı bu.
+        self.persist_media(entry, &mut meta, &target).await;
+
+        match sonuc {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(e) => return Err(DownloadError::Other(format!("akış görevi çöktü: {e}"))),
+        }
+
+        // --- 8. Birleştirme / kap dönüşümü ---
+        let birlestir = plan.audio.is_some();
+        // ffmpeg varken MPEG-TS de `.mp4`e çevriliyor (bkz. `media::output_extension`).
+        let donustur = !birlestir && ffmpeg.is_some() && plan.container == media::Container::Ts;
+
+        let kaynak = if birlestir || donustur {
+            // Parçalar indi ama kullanıcı bu arada duraklattıysa birleştirmeye
+            // hiç başlanmıyor: devam edildiğinde parçalar zaten yerinde,
+            // yalnızca bu adım tekrarlanacak.
+            if cancel.is_cancelled() {
+                return Err(DownloadError::Cancelled);
+            }
+
+            {
+                let mut state = entry.state.lock().unwrap();
+                state.status = DownloadStatus::Merging;
+                state.speed = 0.0;
+            }
+            self.emit(entry);
+
+            let ff = ffmpeg.as_ref().expect("birleştirme ffmpeg olmadan planlanmıyor");
+            let mut inputs = vec![video_part.clone()];
+            if birlestir {
+                inputs.push(audio_part.clone());
+            }
+            media::mux::run(
+                Path::new(&ff.path),
+                &media::mux::MuxRequest { inputs, output: mux_part.clone() },
+            )
+            .await?;
+
+            // ffmpeg kesilemiyor (`-c copy` zaten saniyeler sürüyor); iptal
+            // ancak burada görülüyor. Parça dosyaları duruyor, yani devam
+            // edildiğinde iş baştan indirmekle değil birleştirmeyle sürüyor.
+            if cancel.is_cancelled() {
+                let _ = tokio::fs::remove_file(&mux_part).await;
+                return Err(DownloadError::Cancelled);
+            }
+
+            let _ = tokio::fs::remove_file(&video_part).await;
+            let _ = tokio::fs::remove_file(&audio_part).await;
+            mux_part
+        } else {
+            video_part
+        };
+
+        self.finalize(entry, &kaynak, &target).await?;
+
+        // Tahmin yerine gerçek boyut: indirme bittiğinde ilerleme çubuğunun
+        // %97'de kalması ya da %100'ü aşması kullanıcıya yanlış bilgi verirdi.
+        if let Ok(bilgi) = tokio::fs::metadata(&target).await {
+            let mut state = entry.state.lock().unwrap();
+            state.total_size = bilgi.len();
+            if let Some(m) = state.media.as_mut() {
+                m.estimated = false;
+                m.video_done = m.video_total;
+                m.audio_done = m.audio_total;
+                m.video_bytes = bilgi.len();
+                m.audio_bytes = 0;
+            }
+        }
+        self.emit(entry);
+        Ok(())
+    }
+
+    /// Akış devam noktasını diske yazar.
+    async fn persist_media(&self, entry: &Arc<Entry>, meta: &mut ResumeMeta, target: &Path) {
+        {
+            let state = entry.state.lock().unwrap();
+            if let (Some(m), Some(kayit)) = (state.media.as_ref(), meta.media.as_mut()) {
+                kayit.video_done = m.video_done;
+                kayit.video_bytes = m.video_bytes;
+                kayit.audio_done = m.audio_done;
+                kayit.audio_bytes = m.audio_bytes;
+            }
+            meta.total_size = state.total_size;
+            meta.file_name = state.file_name.clone();
+        }
+        if let Err(e) = meta.save(target).await {
+            log::warn!("akış devam noktası yazılamadı: {e}");
+        }
     }
 
     /// Segment planını çıkarır: resume metası varsa ve tazeyse onu, yoksa yeni plan.
@@ -1381,6 +1980,18 @@ impl DownloadManager {
         self.emit(entry);
         Ok(())
     }
+}
+
+/// `film.mp4` + `audio` → `film.mp4.audio.mgpart`
+///
+/// Akış indirmesinde tek bir yarım dosya yetmiyor: ses ayrı iniyor ve ffmpeg
+/// çıktısı da bir üçüncü dosyaya yazılıyor. Hepsi `.mgpart` uzantısıyla
+/// bitiyor ki `.gitignore`, yedekleme kuralları ve kullanıcının gözü onları
+/// yarım dosya olarak tanısın.
+fn ek_part_yolu(target: &Path, etiket: &str) -> PathBuf {
+    let mut ad = target.file_name().unwrap_or_default().to_os_string();
+    ad.push(format!(".{etiket}.{}", writer::PART_EXTENSION));
+    target.with_file_name(ad)
 }
 
 /// Kategori açıksa dosya türüne göre alt klasör, değilse verilen klasörün
@@ -1724,6 +2335,7 @@ mod tests {
             error: None,
             warning: None,
             supports_ranges: true,
+            media: None,
             created_at: 0,
             completed_at: None,
         };

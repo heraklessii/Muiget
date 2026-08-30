@@ -8,6 +8,7 @@ pub mod clipboard;
 pub mod commands;
 pub mod download;
 pub mod extension_bridge;
+pub mod media;
 pub mod settings;
 pub mod update;
 
@@ -177,6 +178,9 @@ pub fn run() {
             commands::app_version,
             commands::probe_url,
             commands::start_download,
+            commands::probe_media,
+            commands::start_media_download,
+            commands::ffmpeg_status,
             commands::list_downloads,
             commands::rescan_downloads,
             commands::pause_download,

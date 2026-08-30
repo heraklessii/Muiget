@@ -416,11 +416,12 @@
 
     <main>
       <div class="kapsam hero">
-        <span class="rozet">v0.1.0 · ön sürüm</span>
+        <span class="rozet">v0.1.2 · ön sürüm</span>
         <h1>İndirme yöneticisi,<br /><span class="vurgu">lisans anahtarı olmadan.</span></h1>
         <p class="alt-baslik">
           Muiget dosyayı parçalara bölüp paralel indirir, bağlantı koparsa kaldığı
-          yerden devam eder. Açık kaynak, ücretsiz, telemetrisiz.
+          yerden devam eder. HLS/DASH video akışlarını da tek dosyada birleştirir.
+          Açık kaynak, ücretsiz, telemetrisiz.
         </p>
 
         <div class="dugmeler">
@@ -500,12 +501,28 @@
           <div class="kart">
             <h3>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="14" height="14" rx="2" /><path d="m16 10 6-3v10l-6-3z" /></svg>
+              Video akışı (HLS/DASH)
+            </h3>
+            <p>
+              Oynatıcı videoyu yüzlerce parça hâlinde alıyorsa (<code>.m3u8</code>,
+              <code>.mpd</code>) parçalar paralel inip tek dosyada birleşir. Kalite ve
+              ses dili önceden seçilir, indirme duraklatılıp sürdürülebilir.
+              <a href="https://ffmpeg.org/">ffmpeg</a> yalnızca kap dönüşümü ve ayrı
+              inen sesin birleştirilmesi için gerekiyor — isteğe bağlı.
+            </p>
+          </div>
+
+          <div class="kart">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                 stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18" /></svg>
               Tarayıcı entegrasyonu
             </h3>
             <p>
               Chrome uzantısıyla sağ tık → “Muiget ile indir”, sayfadaki bağlantıları
-              tarama ve isteğe bağlı olarak tarayıcı indirmelerini devralma.
+              ve videoları tarama, isteğe bağlı olarak tarayıcı indirmelerini
+              devralma. Video yakalama ayrı izin ister, varsayılan kapalıdır.
             </p>
           </div>
 
@@ -545,6 +562,13 @@
             <li>Sitelerin indirme limitlerini, kotalarını veya hız sınırlarını aşmaz.</li>
             <li>Rapidgator, Mega gibi premium link servislerinin kısıtlarını atlatmaz.</li>
             <li>Bir sitenin kullanım şartlarını ihlal eden “bypass” özelliği içermez.</li>
+            <li>
+              DRM korumalı video indirmez. HLS'in <code>AES-128</code> parça şifrelemesi
+              destekleniyor — anahtar manifestin gösterdiği adresten herkese açık
+              veriliyor. Buna karşılık <code>SAMPLE-AES</code> (FairPlay), Widevine ve
+              PlayReady korumalı içerik açıkça reddedilir.
+            </li>
+            <li>Canlı yayın kaydetmez.</li>
           </ul>
           <p class="kapanis">
             Buradaki “hızlı indirme” yalnızca meşru HTTP seviyesinde optimizasyon
@@ -560,7 +584,7 @@
           Proje erken aşamada. Aşağıdakiler ölçülmüş rakamlar, tahmin değil.
         </p>
         <div class="rakamlar">
-          <div class="rakam"><b>143</b><span>otomatik test</span></div>
+          <div class="rakam"><b>292</b><span>otomatik test</span></div>
           <div class="rakam"><b>3,4 MB</b><span>kurulum paketi</span></div>
           <div class="rakam"><b>8</b><span>varsayılan paralel parça</span></div>
           <div class="rakam"><b>0</b><span>toplanan veri</span></div>
@@ -570,8 +594,9 @@
       <section id="kurulum" class="kapsam">
         <h2>Kurulum</h2>
         <p class="bolum-alt">
-          Hazır paket için sürümler sayfasındaki <code>.exe</code> yeterli. Kaynaktan
-          derlemek isteyenler için:
+          Hazır paket için sürümler sayfasındaki <code>.exe</code> yeterli. Linux
+          (<code>.deb</code> / <code>.AppImage</code>) ve macOS paketleri de üretiliyor
+          ama henüz sahada denenmedi. Kaynaktan derlemek isteyenler için:
         </p>
         <pre><span class="yorum"># Rust 1.77+ ve Node.js 20+ gerekiyor</span>
 git clone https://github.com/heraklessii/Muiget.git

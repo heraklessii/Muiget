@@ -7,9 +7,9 @@ anahtarı satın alması gerekmeyen, kodunu herkesin okuyup değiştirebildiği 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/durum-geli%C5%9Ftirme%20a%C5%9Famas%C4%B1nda-orange.svg)](docs/tasks.md)
 
-> ⚠️ **Bu proje erken geliştirme aşamasında.** İndirme motoru, arayüz ve Chrome
-> uzantısı çalışıyor (158 test geçiyor) ama uygulama geniş çapta sahada
-> denenmedi ve torrent desteği henüz eklenmedi. İlerlemeyi
+> ⚠️ **Bu proje erken geliştirme aşamasında.** İndirme motoru, video akışı
+> indirme, arayüz ve Chrome uzantısı çalışıyor (292 test geçiyor) ama uygulama
+> geniş çapta sahada denenmedi ve torrent desteği henüz eklenmedi. İlerlemeyi
 > [`docs/tasks.md`](docs/tasks.md) üzerinden takip edebilirsiniz.
 
 **[muiget sayfası](https://heraklessii.github.io/Muiget/)** ·
@@ -39,8 +39,18 @@ anahtarı satın alması gerekmeyen, kodunu herkesin okuyup değiştirebildiği 
   devralınır; hız sınırı ve saat bazlı kurallar (gece sınırsız, gündüz 2 MB/s).
   Aynı siteden birden çok indirme varsa bağlantı kotası aralarında adil
   bölüşülür — hiçbiri sıfır byte'ta beklemez.
+- **Video akışı indirme (HLS/DASH)** — Sayfadaki oynatıcı videoyu tek dosya
+  yerine yüzlerce parça hâlinde alıyorsa (`.m3u8`, `.mpd`) Muiget parçaları
+  paralel indirip tek dosyada birleştirir. Kalite ve ses dili indirmeden önce
+  seçilir; parçalar paralel iner ama **sırayla** yazılır, indirme duraklatılıp
+  sürdürülebilir. HLS'in `AES-128` parça şifrelemesi çözülür.
+  [ffmpeg](https://ffmpeg.org/) **isteğe bağlı**: yalnızca `.ts` → `.mp4`
+  dönüşümü ve ayrı inen sesin görüntüyle birleştirilmesi için gerekiyor;
+  kurulu değilse video yine iniyor, gerekli olduğu durumda da indirme
+  başlamadan söyleniyor.
 - **Tarayıcı entegrasyonu** — Chrome uzantısı ile sağ tık → "Muiget ile indir",
-  sayfa taraması ve isteğe bağlı indirme devralma
+  sayfa taraması, **video yakalama** (sayfadaki HLS/DASH yayınlarını bulur;
+  isteğe bağlı izin, varsayılan kapalı) ve isteğe bağlı indirme devralma
   ([kurulum](extension/README.md)).
 - **Pano izleme** — Kopyaladığınız adres indirilebilir bir dosyaya işaret
   ediyorsa Muiget sorar; uzantı kurmadan da çalışır. Varsayılan **kapalı**:
@@ -72,6 +82,12 @@ Bu net bir sınırdır ve değişmeyecektir:
 - ❌ Rapidgator, Mega gibi premium link servislerinin kısıtlarını **atlatmaz**.
 - ❌ Herhangi bir sitenin kullanım şartlarını ihlal eden "bypass" özelliği
   içermez.
+- ❌ **DRM korumalı video indirmez.** HLS'in `AES-128` parça şifrelemesi
+  destekleniyor — anahtar manifestin gösterdiği adresten herkese açık veriliyor
+  ve tarayıcıdaki oynatıcı da aynısını yapıyor. Buna karşılık `SAMPLE-AES`
+  (FairPlay), Widevine ve PlayReady korumalı içerik açıkça reddedilir; oradaki
+  anahtar bir lisans sunucusundan alınıyor ve onu aşmak bu sınırın dışı olurdu.
+- ❌ Canlı yayın kaydetmez.
 
 Buradaki "hızlı indirme" yalnızca meşru HTTP seviyesinde optimizasyon demektir:
 paralel Range istekleri, resume ve bant genişliği yönetimi. Bu sınırı aşmayı
@@ -129,6 +145,7 @@ npm run tauri build  # üretim binary'si
 | Masaüstü kabuk | Tauri v2 |
 | Backend | Rust + Tokio |
 | HTTP istemci | reqwest |
+| Akış videosu | Kendi kodumuz (m3u8/MPD) + ffmpeg (isteğe bağlı) |
 | Torrent motoru | librqbit |
 | Frontend | React + Vite + TypeScript |
 | Tarayıcı uzantısı | Chrome MV3 + Native Messaging |
@@ -145,7 +162,7 @@ Bu seçimlerin gerekçeleri için: [`docs/decisions.md`](docs/decisions.md).
 | 3 | Tauri UI (React) | ✅ Tamamlandı |
 | 4 | Torrent entegrasyonu | ⚪ Ertelendi |
 | 5 | Chrome uzantısı | ✅ Tamamlandı |
-| 6 | HLS/DASH, checksum, opsiyonel virüs taraması | 🟡 Checksum bitti |
+| 6 | HLS/DASH video, checksum, opsiyonel virüs taraması | 🟡 Video ve checksum bitti |
 | 7 | Plugin sistemi, istatistikler, katkı rehberi | ⚪ Bekliyor |
 
 **Bilinen eksikler:** torrent desteği henüz yok; video sitelerinden HLS/DASH

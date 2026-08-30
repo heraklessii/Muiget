@@ -7,7 +7,7 @@
 
   "permissions": ["contextMenus", "nativeMessaging", "storage", "activeTab", "scripting"],
 
-  "optional_permissions": ["downloads", "cookies"],
+  "optional_permissions": ["downloads", "cookies", "webRequest"],
   "optional_host_permissions": ["<all_urls>"],
 
   "background": {

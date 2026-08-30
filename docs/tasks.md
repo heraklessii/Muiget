@@ -159,10 +159,25 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
 - [ ] Edge uyarlaması (registry kaydı zaten yazılıyor, uzantı kimliği farklı)
 - [ ] Chrome Web Store yayını
 
-## Faz 6 — Medya Özel ve Güven Katmanı
+## Faz 6 — Medya Özel ve Güven Katmanı 🟡 (HLS/DASH ve checksum bitti)
 
-- [ ] HLS/DASH (m3u8) indirme + ffmpeg ile mp4 birleştirme
-- [ ] yt-dlp entegrasyonu (opsiyonel dış bağımlılık olarak)
+- [x] **HLS/DASH indirme + ffmpeg ile birleştirme** (karar #25). `src/media/`:
+      m3u8 (master + medya), MPD (SegmentTemplate/Timeline/List/Base),
+      `AES-128` çözme, paralel indirip sıralı yazma, parça bazlı devam etme.
+      ffmpeg **isteğe bağlı** — yalnızca `.ts` → `.mp4` dönüşümü ve ayrı inen
+      sesin birleştirilmesi için. Ayrı ses varken ffmpeg yoksa indirme tek byte
+      inmeden duruyor ve sebebi yazılıyor.
+- [x] **DRM ve canlı yayın açıkça reddediliyor.** `SAMPLE-AES`/Widevine/
+      PlayReady ayrıştırma anında, canlı yayın da öyle. Sessiz başarısızlık yok.
+- [x] **Uzantıda video yakalama** (karar #26). `webRequest` isteğe bağlı izin,
+      varsayılan kapalı; manifest istekleri sekme başına `storage.session`de.
+- [ ] Altyazı parçaları (`#EXT-X-MEDIA:TYPE=SUBTITLES`, DASH `text`) —
+      şu an atlanıyor. WebVTT'yi indirip yanına yazmak küçük bir ek.
+- [ ] `#EXT-X-DISCONTINUITY` sonrası kodek değişimi — parçalar yine iniyor ama
+      ffmpeg olmadan birleşik dosya bazı oynatıcılarda tökezleyebilir.
+- [ ] yt-dlp entegrasyonu (opsiyonel dış bağımlılık olarak) — sayfa
+      ayrıştırma gerektiren siteler için; manifest adresi bilinen her yayın
+      artık yt-dlp'siz iniyor.
 - [x] **İndirilen dosya için checksum gösterimi** (karar #21). SHA-256 ve MD5,
       akış hâlinde; satır sağ tık menüsünden isteniyor, otomatik değil.
       Yalnızca tamamlanmış indirmede çalışıyor.
@@ -204,7 +219,7 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
       kalan iki 200 ms'lik bekleyiş bir olayın *olmamasını* sınıyor; onlar
       yanlışlıkla geçebilir ama yanlışlıkla düşemez.
 - [x] `cargo clippy --all-targets` temiz (CI'a eklenmesi bekliyor)
-- [ ] **Arayüzün hiç otomatik testi yok.** Rust tarafı 198 testle korunuyor,
+- [ ] **Arayüzün hiç otomatik testi yok.** Rust tarafı 292 testle korunuyor,
       `src/` tarafında sıfır. Artık orada gerçek mantık var: bağlam menüsünün
       duruma göre kısalması, toplu adres ayrıştırma, sürükle-bırakta
       `text/uri-list` çözümleme, `urlDosyaAdi` ayrıştırması, kopya uyarısı.
@@ -248,15 +263,21 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
      gerçek pencerede **tıklanarak** denenmedi. Pano izleme ve sürüm kontrolü
      9. oturumda gerçek uygulamada doğrulandı.
 
-2. **HLS/DASH (m3u8) video indirme** (Faz 6) — kod tarafında IDM'e yaklaştıran
-   **en büyük tek boşluk**. IDM'i bugün satan özellik video yakalama; motor,
-   arayüz ve uzantı hazırken burası eksik kalıyor. ffmpeg dış bağımlılık
-   olarak mı gelecek, yoksa segment birleştirme kendi kodumuzda mı yapılacak —
-   ilk karar bu.
+2. **Video akışının sahada denenmesi** (10. oturumda eklendi, Faz 6). Kod ve
+   testler hazır — 16 uçtan uca test yerel sunucuya karşı koşuyor — ama
+   **gerçek bir video sitesine karşı hiç denenmedi**. Denenmesi gerekenler:
+   - Bir sitede uzantının "Video yakala" anahtarını açıp manifestin
+     görünmesi, sonra indirilip **izlenebilmesi**.
+   - ffmpeg kurulu bir makinede ayrı ses/video birleştirmesi. Entegrasyon
+     sahte bir ffmpeg betiğiyle testli; gerçek ffmpeg'in `-c copy` çıktısını
+     kimse izlemedi.
+   - Sağlayıcıya özgü tökezlemeler: imzalı/süreli parça adresleri, `Referer`
+     isteyen CDN'ler, `#EXT-X-DISCONTINUITY` içeren yayınlar.
 
 3. **Tarayıcı kapsamı** — Firefox/Edge uyarlaması (native messaging protokolü
    aynı, yalnızca manifest farklı) ve Chrome Web Store yayını. Ucuz kazanç:
-   IDM'in üstünlüğü hızda değil yakalamada.
+   IDM'in üstünlüğü hızda değil yakalamada. Video yakalama geldiğine göre
+   uzantının değeri de arttı.
 
 4. **Faz 4 (torrent)** — en büyük yeni yüzey. IDM'de torrent yok, yani rekabet
    açısından 2. ve 3. maddeden sonra geliyor.

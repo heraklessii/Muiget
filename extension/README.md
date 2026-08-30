@@ -39,6 +39,7 @@ Uzantı simgesine tıkla. Sağ üstte **bağlı · v0.1.0** yazıyorsa köprü �
 | Sağ tık | Bir bağlantıya/videoya/resme sağ tıkla → **Muiget ile indir** |
 | Sayfa taraması | Uzantı simgesine tıkla → sayfadaki dosyalar listelenir |
 | Devralma | Popup → **İndirmeleri devral** → Chrome'un başlattığı indirmeler Muiget'e geçer |
+| Video yakalama | Popup → **Video yakala** → sayfayı yenile → HLS/DASH yayınları popup'ta listelenir |
 
 ## İzinler ve gizlilik
 
@@ -52,9 +53,20 @@ varsayılan olarak kapalı:
 | `activeTab` + `scripting` | Popup açılınca | Sayfayı **yalnızca o an** tarar; kalıcı content script yok |
 | `downloads` | Kullanıcı devralmayı açınca | Chrome indirmesini iptal edip Muiget'e aktarmak |
 | `cookies` + `<all_urls>` | Kullanıcı çerez gönderimini açınca | Giriş gerektiren dosyalar için `Cookie` başlığı |
+| `webRequest` + `<all_urls>` | Kullanıcı video yakalamayı açınca | Sayfadaki HLS/DASH manifest adreslerini görmek |
 
 Çerez gönderimi kapalı gelir ve açıkça açılması gerekir: çerez oturum kimliği
 taşır ve varsayılan olarak uygulama dışına vermek doğru değildir.
+
+**Video yakalama** da kapalı gelir. Açıldığında uzantı gezdiğiniz sayfaların ağ
+isteklerinin **adreslerini** görür; bu ağır bir yetki ve kurulumda sessizce
+istenmemeli. Görülen adreslerin yalnızca `.m3u8`/`.mpd` olanları saklanır,
+onlar da sekme başına `storage.session`de tutulur: diske yazılmaz, sayfa
+değişince ve tarayıcı kapanınca silinir, hiçbir yere gönderilmez.
+
+Neden ayrı bir yakalayıcı gerekiyor: HLS/DASH manifestinin adresi sayfanın
+HTML'inde geçmiyor, oynatıcı JavaScript'i çalışırken isteniyor. Popup'ın DOM
+taraması bu videoları tanım gereği bulamaz.
 
 ## Sınırlar
 

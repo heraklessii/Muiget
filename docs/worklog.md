@@ -7,6 +7,166 @@ Format: Tarih, yapılanlar, kararlar, sıradaki adım.
 
 ---
 
+## 2026-08-31 (10. oturum) — HLS/DASH Video İndirme (Faz 6)
+
+İlker: "Sıradaki en büyük iş HLS/DASH video indirme — IDM'i bugün satan özellik
+o, ve motor/arayüz/uzantı hazırken tek büyük boşluk orası." `docs/tasks.md`
+zaten bunu 2. sıraya yazmıştı ve ilk kararı da soruyordu: ffmpeg dış bağımlılık
+mı, birleştirme kendi kodumuzda mı?
+
+**Cevap: ikisi de** (karar #25). Manifest ayrıştırma, parça indirme, `AES-128`
+çözme ve parçaların uç uca eklenmesi bizim kodumuz; ffmpeg yalnızca iki iş için
+ve isteğe bağlı: `.ts` → `.mp4` dönüşümü ve **ayrı inen sesi videoyla
+birleştirmek**.
+
+### Yeni modül: `src-tauri/src/media/`
+
+| Dosya | İş |
+|---|---|
+| `url.rs` | Manifestteki göreli adresleri çözme (`url` crate'i yerine, dar kapsam) |
+| `xml.rs` | Küçük XML okuyucu — yalnızca DASH için |
+| `m3u8.rs` | HLS master + medya playlist |
+| `mpd.rs` | DASH: SegmentTemplate (`$Number$`/`$Time$`), SegmentTimeline, SegmentList, SegmentBase |
+| `crypt.rs` | `AES-128-CBC` parça çözme, anahtar önbelleği, DRM tespiti |
+| `pipeline.rs` | Parçaları paralel indirip **sırayla** yazma |
+| `mux.rs` | ffmpeg bulma ve çağırma |
+
+Motorun sparse yazma yaklaşımı (karar #3) burada kullanılamıyor: bir parçanın
+dosyadaki yeri ancak kendinden öncekilerin boyu bilinince belli oluyor. Çözüm
+`futures_util`in `buffered(N)`i — N parça paralel iniyor, sonuçlar manifest
+sırasında teslim ediliyor. Ayrı bir sıralama tamponu yok, bellek N parçayla
+sınırlı.
+
+Yol boyunca çıkan derleyici hatası kayda değer: `stream::iter(...).map(...)`
+kapanışına parça **referansı** verince derleyici "her ömür için geçerli" (HRTB)
+bir kapanış istiyor ve fonksiyon `tokio::spawn` içinde çağrıldığında kural
+sağlanamıyordu. Kapanışa `usize` taşıyıp diziyi içeriden indekslemek ömrü
+kapanışın dışında sabitliyor.
+
+### Devam etme
+
+Yazma sıralı olduğu için devam noktası iki sayı: kaç parça tamamlandı, dosya
+kaç byte. `.muiget` metasına yeni bir `media` alanı eklendi (eski metalar
+`serde(default)` ile okunmaya devam ediyor). Devam ederken dosya kayıtlı boya
+**kırpılıyor** — uygulama meta yazmadan çöktüyse fazladan kalmış son parça
+böyle atılıyor. Kırpmasaydık aynı parça iki kez yazılır ve video sessizce
+bozulurdu. Uçtan uca test bunu doğrudan sınıyor: duraklatıp devam ettikten
+sonra hem içerik birebir tutuyor hem de ilk parça sunucudan **bir kez**
+istenmiş oluyor.
+
+### Nerede durduğumuz — DRM ve canlı yayın
+
+`AES-128` destekleniyor: anahtar manifestin gösterdiği adresten herkese açık
+veriliyor, tarayıcıdaki oynatıcı da aynısını yapıyor, atlatılan bir koruma yok.
+`SAMPLE-AES` (FairPlay), Widevine ve PlayReady **ayrıştırma anında** reddediliyor
+— `CLAUDE.md`'deki kapsam sınırı. Ret, indirme başlamadan ve sebebi yazılarak
+oluyor; test tek bir parçanın bile istenmediğini doğruluyor.
+
+Canlı yayın da reddediliyor: `#EXT-X-ENDLIST` yoksa akışın sonu yok, indirmenin
+de sonu olmazdı.
+
+### ffmpeg gerekiyorsa ve yoksa: hiç başlama
+
+Ayrı ses varken ffmpeg olmadan tek dosya çıkmıyor. Kontrol **tek byte inmeden**
+yapılıyor ve arayüzde indir düğmesi kapanıp sebebi yazılıyor. Alternatif —
+yüzlerce parçayı indirip sonunda birleştirememek — kullanıcının bant
+genişliğini çöpe atmak olurdu. Kaçış yolu diyalogda: "Ses indirme — yalnızca
+görüntü".
+
+Öğrenilen bir ayrıntı: `mux::adaylar` önce yapılandırılmış yolu, sonra PATH'i
+deniyordu. Bunu "yol yazılıysa **yalnızca** o" hâline getirdim. Gerekçe zaten
+doc yorumunda yazılıydı ("kullanıcı hangisini istediğini yazdıysa başkasını
+çalıştırmak sürpriz olurdu") ama kod onu uygulamıyordu. Yan fayda: testler
+"ffmpeg yok" durumunu geliştiricinin makinesinden bağımsız kurabiliyor.
+
+### Arayüz
+
+Adres `.m3u8`/`.mpd` ise (ya da `probe_url` akış içerik türü dönerse) yeni
+indirme penceresi manifesti okuyup **kalite ve ses seçicisi** gösteriyor; süre
+ve yaklaşık boyut da orada. Varsayılan seçim motorun kendi tercihi
+(`media::describe` → `defaultVideo`), yoksa önizleme ile indirmenin ayrışması
+işten değil.
+
+Satırda yeni bir durum var: **Birleştiriliyor**. Ayrı durum olmasının sebebi o
+aşamada ağ trafiği olmaması; "İniyor" yazmak takılmış izlenimi verirdi. İlerleme
+"128/430 parça" olarak da gösteriliyor ve boyut tahmin olduğu sürece başında
+`~` duruyor.
+
+Ayarlara ffmpeg yolu (yanında "Sına" düğmesi), varsayılan kalite, ses dili ve
+eşzamanlı parça sayısı eklendi.
+
+### Uzantı (karar #26)
+
+DOM taraması HLS manifestini tanım gereği bulamıyor: adres sayfanın HTML'inde
+geçmiyor, oynatıcı JavaScript'i çalışırken isteniyor. Bu yüzden `webRequest`
+**isteğe bağlı izin** olarak eklendi, varsayılan kapalı. Açıkken manifest
+istekleri sekme başına `storage.session`de birikiyor ve popup'ta listeleniyor;
+süzgeçten geçmeyen hiçbir adres kaydedilmiyor, sayfa değişince liste düşüyor.
+
+### Testler
+
+292 test geçiyor (önce 198). Yeni olan: 76 birim testi (ayrıştırıcılar, URL
+çözme, XML, AES, kalite seçimi) ve 16 uçtan uca test.
+
+Uçtan uca testler yerel bir HTTP sunucusuna karşı koşuyor ve hangi yolun kaç
+kez **GET** ile istendiğini sayıyor — devam etmenin gerçekten parçaları
+atladığını başka türlü kanıtlayamıyorduk. Şifreli fixture gerçekten
+`AES-128-CBC` ile üretiliyor (`aes`/`cbc` dev-dependency), IV türetme kuralı
+testte bağımsız olarak kuruluyor ki motordaki uygulama yanlışsa test geçmesin.
+
+ffmpeg entegrasyonu **sahte bir ffmpeg betiğiyle** sınanıyor (Windows `.cmd`,
+Unix `sh`): `-version`e yanıt veriyor, çağrıldığı argümanları günlüğe yazıyor
+ve bir çıktı üretiyor. Sınanan şey ffmpeg değil, etrafındaki zincir — bulunması,
+doğru argümanlarla çağrılması, çıktının nihai ada taşınması, üç parça dosyasının
+temizlenmesi. Gerçek ffmpeg her makinede yok (bu makinede de yok) ve olsa bile
+testi onun sürümüne bağlamak sonucu değişken yapardı.
+
+Bir hata testten çıktı: **anahtar önbelleği izdihamı.** Altı şifreli parça
+paralel inince hepsi önbelleği aynı anda boş buluyor ve anahtarı ayrı ayrı
+çekiyordu (test üç istek gördü, biri bekleniyordu). Çözüm çift kontrollü bir
+kapı: `tokio::sync::Mutex` beklerken bir başkası indirdiyse uyanan istek
+önbellekte buluyor.
+
+Bir de tekrar temizlendi: yeniden deneme sınıflandırması (`yeniden_denenebilir`)
+akış boru hattında ikinci kez yazılmıştı. Motorun köküne taşındı; iki boru hattı
+da aynı kuralı kullanıyor, yoksa birine eklenen yeni hata türü diğerinde
+unutulurdu.
+
+### Gerçek pencerede doğrulama
+
+Testler motoru doğruluyor ama uygulamanın kendisini değil. Bu yüzden akış
+indirmesi **gerçek uygulamada** da koşturuldu — 8. oturumdaki köprü denemesiyle
+aynı yöntemle, yani dışarıdan:
+
+1. Yerelde beş parçalık bir VOD playlisti veren küçük bir sunucu (Node, 8099).
+2. `muiget.exe --add <base64>` — köprünün kullandığı argüman. Uygulama açıldı,
+   isteği aldı ve indirmeye başladı.
+
+| Ölçüt | Sonuç |
+|---|---|
+| Sunucu günlüğü | `HEAD list.m3u8` → `GET list.m3u8` → beş parça |
+| Parça sırası | `s0, s1, s2, s4, s3` — **paralel indi** |
+| Çıktı dosyası | `list.ts`, 327.680 byte |
+| SHA-256 | `e38015de…89c14` — beklenen birleşimle **birebir aynı** |
+| Artıklar | `.mgpart` ve `.muiget` yok; temizlik çalışmış |
+
+Yani parçalar paralel iniyor ama dosyaya sırayla yazılıyor: sunucudan `s4`,
+`s3`ten önce geldiği hâlde çıktı bozulmadı. ffmpeg bu makinede kurulu olmadığı
+için dosya `.ts` olarak kaldı — beklenen davranış.
+
+### Doğrulanmayan
+
+Gerçek bir video sitesine karşı denenmedi ve **gerçek ffmpeg hiç
+çalıştırılmadı** (bu makinede kurulu değil; entegrasyon sahte betikle testli).
+Arayüz tarafı da elle tıklanmadı (`npm run tauri dev` gerekiyor); Rust tarafı
+292 testle korunuyor, `src/` tarafında hâlâ otomatik test yok.
+
+**Sıradaki:** gerçek dünya doğrulaması (video sitesi + Chrome'da uzantı),
+Firefox/Edge uyarlaması, sonra Faz 4 (torrent).
+
+---
+
+
 ## 2026-08-30 (9. oturum) — Proxy, Kimlik Doğrulama, Checksum, Pano İzleme, Sürüm Kontrolü, Çapraz Platform Yayın
 
 İlker "daha neler eklenebilir, IDM ile ne zaman yarışır" diye sordu; ardından

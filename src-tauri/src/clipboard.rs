@@ -24,6 +24,10 @@ const MAKUL_UZUNLUK: usize = 2048;
 /// yolunun sonunda **tanınan bir dosya uzantısı** olan adresler. Her URL'yi
 /// yakalamak, kullanıcı bir haber sayfasının adresini kopyaladığında da
 /// sormak demekti; ikinci kez rahatsız eden bir özellik kapatılır.
+///
+/// Akış manifestleri (`.m3u8`, `.mpd`) de yakalanıyor: kategori tablosunda
+/// yoklar — çünkü kendileri birer video dosyası değil — ama kullanıcı için
+/// tam olarak bir video indirmesi anlamına geliyorlar (karar #25).
 pub fn indirilebilir_baglanti(pano: &str) -> Option<String> {
     let metin = pano.trim();
 
@@ -36,6 +40,10 @@ pub fn indirilebilir_baglanti(pano: &str) -> Option<String> {
     }
     if !(metin.starts_with("http://") || metin.starts_with("https://")) {
         return None;
+    }
+
+    if crate::media::detect(metin, None).is_some() {
+        return Some(metin.to_string());
     }
 
     let ad = crate::download::http::file_name_from_url(metin)?;
@@ -94,5 +102,17 @@ mod tests {
     fn tanimayan_uzanti_yakalanmiyor() {
         // Kategori tablosunda olmayan uzantı: bilinen bir dosya türü değil.
         assert_eq!(indirilebilir_baglanti("https://ornek.com/veri.xyz"), None);
+    }
+
+    #[test]
+    fn akis_manifesti_yakalaniyor() {
+        assert_eq!(
+            indirilebilir_baglanti("https://cdn.com/vod/master.m3u8"),
+            Some("https://cdn.com/vod/master.m3u8".to_string())
+        );
+        assert_eq!(
+            indirilebilir_baglanti("https://cdn.com/x.mpd?token=1"),
+            Some("https://cdn.com/x.mpd?token=1".to_string())
+        );
     }
 }

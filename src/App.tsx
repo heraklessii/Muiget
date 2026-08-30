@@ -35,6 +35,7 @@ import {
   type AppSettings,
   type DownloadSnapshot,
   type DownloadStatus,
+  type MediaSelection,
 } from './lib/types';
 
 /**
@@ -241,6 +242,24 @@ export default function App() {
         await refresh();
         setAddAcik(false);
       }, 'İndirme başlatılamadı');
+    },
+    [refresh, sarmala],
+  );
+
+  /**
+   * Akış indirmesi — kullanıcının kalite/ses seçimiyle (karar #25).
+   *
+   * `basla`dan ayrı bir yol gerekiyordu çünkü taşınan bilgi farklı: adres
+   * aynı ama yanında hangi parçanın indirileceği de gidiyor. Seçim
+   * gönderilmezse motor ayarlardaki kalite tercihini uyguluyor.
+   */
+  const baslaMedya = useCallback(
+    async (url: string, directory: string, selection: MediaSelection) => {
+      await sarmala(async () => {
+        await api.startMediaDownload(url, { directory, selection });
+        await refresh();
+        setAddAcik(false);
+      }, 'Video indirmesi başlatılamadı');
     },
     [refresh, sarmala],
   );
@@ -850,6 +869,7 @@ export default function App() {
           }}
           onStart={basla}
           onStartMany={baslaCoklu}
+          onStartMedia={baslaMedya}
         />
       )}
 

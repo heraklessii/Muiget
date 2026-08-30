@@ -30,6 +30,8 @@ aşmayı hedefliyorsa reddedilmeli ve bu dosyadaki sınır hatırlatılmalı.
 | Backend mantığı | Rust + Tokio | Async paralel indirme için doğal uyum, güvenli bellek yönetimi |
 | HTTP istemci | reqwest | Stream + Range header desteği hazır |
 | Torrent motoru | librqbit | Apache-2.0, saf Rust, zaten Tauri masaüstü örneği var (rqbit projesi) |
+| Akış videosu | Kendi kodumuz (`src/media/`) + `aes`/`cbc` | m3u8/MPD ayrıştırma ve parça birleştirme dış bağımlılık istemiyor; AES için RustCrypto |
+| Kap dönüşümü | ffmpeg — **isteğe bağlı** dış araç | Gömmek paketi on katına çıkarırdı; yalnızca `.ts`→`.mp4` ve ses/video birleştirme için gerekli (karar #25) |
 | Frontend UI | React + Vite + TypeScript | Tauri ile birinci sınıf entegrasyon |
 | Extension | Chrome MV3 | İlker'in Muitoon extension deneyimiyle örtüşüyor |
 | Extension ↔ App köprüsü | Native Messaging (stdin/stdout, length-prefixed JSON) | Chrome'un desteklediği tek güvenli yerel IPC yolu |
@@ -82,7 +84,8 @@ muiget/
 │   ├── tauri.conf.json         ✅ identifier: com.muiget.app
 │   ├── capabilities/           ✅ Dar izin listesi
 │   ├── icons/                  ✅ (varsayılan Tauri ikonları — değiştirilecek)
-│   ├── tests/                  ✅ indirme_uctan_uca.rs (yerel HTTP sunucusu)
+│   ├── tests/                  ✅ indirme_uctan_uca.rs, akis_uctan_uca.rs
+│   │                              (ikisi de yerel HTTP sunucusu kaldırıyor)
 │   └── src/
 │       ├── main.rs             ✅ --native-host kipi ayrımı
 │       ├── lib.rs              ✅ Tauri kurulumu, tepsi, tek örnek, pano izleyici
@@ -103,6 +106,15 @@ muiget/
 │       │   ├── throttle.rs        # Token bucket, host kotası + adil pay
 │       │   │                      #   (karar #17), zaman kuralları
 │       │   └── manager.rs         # Orkestrasyon + adaptif bölme
+│       ├── media/              ✅ Faz 6 — akış videosu (karar #25)
+│       │   ├── mod.rs             # Tipler, protokol tespiti, plan, seçim
+│       │   ├── url.rs             # Manifestteki göreli adresleri çözme
+│       │   ├── xml.rs             # Küçük XML okuyucu (yalnızca DASH için)
+│       │   ├── m3u8.rs            # HLS master + medya playlist
+│       │   ├── mpd.rs             # DASH manifesti
+│       │   ├── crypt.rs           # AES-128 parça çözme, DRM reddi
+│       │   ├── pipeline.rs        # Paralel indir, sırayla yaz
+│       │   └── mux.rs             # ffmpeg bulma ve çağırma
 │       ├── extension_bridge/   ✅ Faz 5
 │       │   ├── mod.rs             # İstek işleme, host kaydı
 │       │   └── native_host.rs     # Chrome native messaging protokolü
@@ -123,12 +135,19 @@ npm run dev       # sadece frontend (Vite, localhost:1420)
 npm run build     # tsc + vite build → dist/
 npm run tauri dev # tam uygulama (Rust + pencere)
 cargo check       # src-tauri/ içinde, hızlı Rust doğrulaması
-cargo test        # 179 birim + 19 uçtan uca test
+cargo test        # 257 birim + 35 uçtan uca test
 ```
 
-Uçtan uca testler (`src-tauri/tests/indirme_uctan_uca.rs`) elle yazılmış küçük
-bir HTTP sunucusu kaldırıp motoru ona karşı çalıştırıyor. `Range` davranışını
-teste göre değiştirebilmek gerektiği için hazır bir test sunucusu kullanılmadı.
+Uçtan uca testler elle yazılmış küçük HTTP sunucuları kaldırıp motoru onlara
+karşı çalıştırıyor; hazır bir test sunucusu bu kontrolü vermiyordu.
+`indirme_uctan_uca.rs` `Range` davranışını (206 / 200 / "Range'i yok say")
+teste göre değiştirebiliyor; `akis_uctan_uca.rs` manifest, parça, anahtar ve
+MPD gibi farklı yanıtları bir yönlendirme tablosundan verip **hangi yolun kaç
+kez istendiğini sayıyor** — devam etmenin gerçekten parçaları atladığını başka
+türlü kanıtlayamıyorduk.
+
+ffmpeg entegrasyonu sahte bir ffmpeg betiğiyle sınanıyor: gerçek ffmpeg her
+makinede yok ve olsa bile testi onun sürümüne bağlamak sonucu değişken yapardı.
 
 > Tauri CLI global kurulu değil, `package.json`'daki `@tauri-apps/cli`'den
 > geliyor (bkz. `docs/decisions.md` #9). Bu yüzden `cargo tauri dev` değil,
@@ -172,7 +191,16 @@ Detaylar için `docs/decisions.md`. Kısa özet:
     http(s) + tanınan dosya uzantısı), varsayılan kapalı (karar #24).
 12. **Sürüm kontrolü**: GitHub yayın listesi. İmzalı updater yok. Bu,
     uygulamanın kendiliğinden yaptığı tek dış istek (karar #23).
-13. **Torrent**: librqbit `Session` API'si üzerinden magnet/`.torrent` desteği.
+13. **Akış videosu (HLS/DASH)**: manifest ayrıştırma, parça indirme, `AES-128`
+    çözme ve birleştirme kendi kodumuzda (`src/media/`); ffmpeg **isteğe
+    bağlı** ve yalnızca `.ts`→`.mp4` dönüşümü ile ayrı inen sesin
+    birleştirilmesi için. Parçalar paralel iniyor ama **sırayla** yazılıyor;
+    devam noktası "kaç parça + kaç byte". Ayrı ses varken ffmpeg yoksa indirme
+    tek byte inmeden duruyor. DRM (SAMPLE-AES/Widevine/PlayReady) ve canlı
+    yayın ayrıştırma anında reddediliyor (karar #25).
+14. **Uzantıda video yakalama**: `webRequest` isteğe bağlı izin, varsayılan
+    kapalı; manifest adresleri sekme başına `storage.session`de (karar #26).
+15. **Torrent**: librqbit `Session` API'si üzerinden magnet/`.torrent` desteği.
     Sequential download modu (streaming izleme) ileride eklenecek.
 
 ## Çalışma Tarzı Notları
@@ -187,17 +215,20 @@ Detaylar için `docs/decisions.md`. Kısa özet:
 
 ## Sıradaki Adım
 
-**Faz 0, 1, 2, 3 ve 5 tamamlandı.** Çalışan bir segmentli indirme motoru, tam
-bir arayüz ve Chrome uzantısı var. 198 test geçiyor. Uygulama gerçek
-penceresinde uçtan uca doğrulandı (8 MB dosya, 8 paralel segment, SHA-256
-birebir aynı). Chrome köprüsü de Chrome'un gerçek çağrısıyla doğrulandı;
-son yayın v0.1.2.
+**Faz 0, 1, 2, 3, 5 ve Faz 6'nın çekirdeği tamamlandı.** Çalışan bir segmentli
+indirme motoru, **HLS/DASH video indirme**, tam bir arayüz ve Chrome uzantısı
+var. 292 test geçiyor. Uygulama gerçek penceresinde uçtan uca doğrulandı (8 MB
+dosya, 8 paralel segment, SHA-256 birebir aynı) ve 10. oturumda akış indirmesi
+de aynı yöntemle doğrulandı (yerel VOD playlisti, parçalar paralel indi, SHA-256
+birebir). Chrome köprüsü de Chrome'un gerçek çağrısıyla doğrulandı; son yayın
+v0.1.2.
 
 IDM'e yaklaştıran eklemeler: host kotasının indirmeler arasında adil
 bölüşülmesi (karar #17), kategori klasörleri (#18), vekil sunucu (#19),
 adrese gömülü kimlik bilgisi (#20), checksum (#21), kopya uyarısı (#22),
-sürüm bildirimi (#23), pano izleme (#24), satır sağ tık menüsü,
-sürükle-bırakla bağlantı ekleme ve toplu ekleme.
+sürüm bildirimi (#23), pano izleme (#24), **akış videosu (#25)**, **uzantıda
+video yakalama (#26)**, satır sağ tık menüsü, sürükle-bırakla bağlantı ekleme
+ve toplu ekleme.
 
 Yayın artık üç platform: Windows + Linux (`.deb`/`.AppImage`) + macOS
 (universal). Linux/macOS paketleri **derleniyor ama sahada denenmedi**; yayın
@@ -219,10 +250,12 @@ Sıradaki öncelikler (`docs/tasks.md` → "Sıradaki"):
    karşılaştırması, ve Chrome'da uzantının yüklenmesi. İkisi de kod işi değil;
    İlker'in makinesinde denenmesi gerekiyor. Ölçüm yapılana kadar "IDM kadar
    hızlı" cümlesi tahmin.
-2. **HLS/DASH (m3u8) video indirme** (Faz 6) — kod tarafında IDM'e yaklaştıran
-   en büyük tek boşluk. IDM'i bugün satan özellik video yakalama.
+2. **Video akışının sahada denenmesi** — kod ve testler hazır ama gerçek bir
+   video sitesine karşı hiç denenmedi; ffmpeg'li birleştirme de gerçek
+   ffmpeg'le çalıştırılmadı (bu makinede ffmpeg yok).
 3. **Tarayıcı kapsamı** — Firefox/Edge uyarlaması + Chrome Web Store yayını.
-   Rekabetin kazanıldığı yer hız değil yakalama.
+   Rekabetin kazanıldığı yer hız değil yakalama; video yakalama geldiğine göre
+   uzantının değeri de arttı.
 4. **Faz 4 (torrent)** — IDM'de zaten yok; 2 ve 3'ten sonra.
 
 **İlker'e kalan (kod dışı):**
@@ -232,6 +265,9 @@ Sıradaki öncelikler (`docs/tasks.md` → "Sıradaki"):
 - **Kod imzalama sertifikası.** Paketler imzasız olduğu sürece Windows
   SmartScreen ve macOS Gatekeeper uyarı gösteriyor; indirenlerin çoğu orada
   duruyor. Kodla çözülmüyor.
+- **ffmpeg.** İsteğe bağlı ama olmadan ayrı sesli yayınlar (DASH'in tamamı)
+  inmiyor. Kurup Ayarlar → "ffmpeg yolu" alanına yazmak ya da `PATH`e eklemek
+  yeterli; uygulama yanındaki kopyayı da buluyor.
 
 **Uyarı — arayüzü denerken:** `cargo run` ile açılan debug binary arayüzü
 `dist/` yerine `devUrl`den (localhost:1420) yüklüyor. Vite çalışmıyorken
