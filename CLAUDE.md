@@ -202,6 +202,15 @@ Detaylar için `docs/decisions.md`. Kısa özet:
     kapalı; manifest adresleri sekme başına `storage.session`de (karar #26).
 15. **Torrent**: librqbit `Session` API'si üzerinden magnet/`.torrent` desteği.
     Sequential download modu (streaming izleme) ileride eklenecek.
+16. **YouTube (manifestsiz) yakalama**: `.m3u8`/`.mpd` süzgecinin yanına
+    doğrudan medya kuralları eklendi. Tek sabite bağlı
+    (`DOGRUDAN_MEDYA_YAKALAMA`): GitHub paketinde açık, Chrome Web Store
+    derlemesinde kapalı — mağaza politikası YouTube indirmeyi yasaklıyor.
+    İmza çözülmüyor; tarayıcının zaten istediği adres görülüyor. Sessiz video
+    akışları popup'ta işaretleniyor (karar #27).
+17. **Ses indirme**: varsayılan `-vn -c:a copy` ile kayıpsız çıkarma
+    (`.m4a`/`.opus`); MP3 isteğe bağlı ve yeniden kodluyor. Çıktı uzantısı
+    `codecs` alanından türetiliyor (karar #28).
 
 ## Çalışma Tarzı Notları
 

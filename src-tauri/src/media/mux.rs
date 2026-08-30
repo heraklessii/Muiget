@@ -85,12 +85,88 @@ async fn surumu_sor(path: &Path) -> Option<String> {
     Some(metin.lines().next().unwrap_or("ffmpeg").trim().to_string())
 }
 
+/// ffmpeg'den ne istendiği.
+///
+/// Ses çıkarma ayrı bir kip çünkü argümanlar sadece "bir bayrak daha" değil:
+/// video izi düşürülüyor (`-vn`), akış eşlemesi anlamını yitiriyor ve MP3'te
+/// `-c copy` felsefesinden **bilerek** sapılıyor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MuxMode {
+    /// Video (varsa ses ile birlikte) yeni kaba taşınıyor. Yeniden kodlama yok.
+    #[default]
+    Video,
+    /// Yalnızca ses, **olduğu gibi**. Yeniden kodlama yok, saniyeler sürüyor.
+    ///
+    /// Varsayılan ses indirme yolu bu: YouTube/HLS/DASH sesi zaten AAC ya da
+    /// Opus, yani çoktan kayıplı sıkıştırılmış. MP3'e çevirmek ikinci bir
+    /// kayıplı geçiş demek — kalite düşer, üstüne dakikalar sürer. Kabı
+    /// değiştirip içeriğe dokunmamak hem anında hem kayıpsız.
+    AudioCopy,
+    /// Yalnızca ses, MP3'e kodlanmış.
+    ///
+    /// Kalite kaybı kaçınılmaz (bkz. [`MuxMode::AudioCopy`]); yine de var,
+    /// çünkü MP3 hâlâ her cihazda çalan tek biçim ve kullanıcı bunu bilerek
+    /// isteyebiliyor.
+    AudioMp3 {
+        kbps: u32,
+    },
+}
+
 /// Birleştirme isteği.
 #[derive(Debug, Clone)]
 pub struct MuxRequest {
     /// Sırayla: video (ya da tek birleşik dosya), sonra varsa ses.
     pub inputs: Vec<PathBuf>,
     pub output: PathBuf,
+    pub mode: MuxMode,
+}
+
+impl MuxRequest {
+    /// Video birleştirme/kap dönüşümü — eski davranış.
+    pub fn video(inputs: Vec<PathBuf>, output: PathBuf) -> Self {
+        Self { inputs, output, mode: MuxMode::Video }
+    }
+}
+
+/// Ses izini hangi uzantıyla yazmak gerektiği.
+///
+/// Kabı yanlış seçmek `-c copy`yi çalışmaz hale getiriyor: AAC'yi `.opus`
+/// diye yazmaya kalkarsan ffmpeg akışı ogg'a koyamayacağı için hata veriyor.
+/// Bu yüzden manifestteki `codecs` alanına bakılıyor; bilinmiyorsa `m4a`,
+/// çünkü akış videosunda ezici çoğunluk AAC.
+pub fn audio_extension(codecs: Option<&str>) -> &'static str {
+    let Some(c) = codecs else { return "m4a" };
+    let c = c.to_ascii_lowercase();
+
+    // RFC 6381 kodları: mp4a.40.x = AAC, mp4a.69 / mp4a.6b = MP3.
+    if c.contains("mp4a.69") || c.contains("mp4a.6b") || c.contains("mp3") {
+        return "mp3";
+    }
+    if c.contains("opus") {
+        return "opus";
+    }
+    if c.contains("vorbis") {
+        return "ogg";
+    }
+    if c.contains("flac") {
+        return "flac";
+    }
+    if c.contains("ec-3") {
+        return "eac3";
+    }
+    if c.contains("ac-3") {
+        return "ac3";
+    }
+    "m4a"
+}
+
+/// `+faststart` yalnızca MP4 ailesinde anlamlı; `.mp3`/`.opus` için ffmpeg
+/// "geçersiz seçenek" deyip çıkıyor.
+fn faststart_uygun(output: &Path) -> bool {
+    matches!(
+        output.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(),
+        Some("mp4" | "m4a" | "m4v" | "mov")
+    )
 }
 
 /// ffmpeg argümanlarını üretir.
@@ -114,21 +190,45 @@ pub fn build_args(req: &MuxRequest) -> Vec<String> {
         args.push(girdi.to_string_lossy().into_owned());
     }
 
-    if req.inputs.len() > 1 {
-        // İlk girdiden yalnızca video, ikinciden yalnızca ses. `-map 0 -map 1`
-        // demek, ayrı inen video dosyasındaki boş ses izini de taşımak olurdu.
-        args.push("-map".into());
-        args.push("0:v:0".into());
-        args.push("-map".into());
-        args.push("1:a:0".into());
+    match req.mode {
+        MuxMode::Video => {
+            if req.inputs.len() > 1 {
+                // İlk girdiden yalnızca video, ikinciden yalnızca ses.
+                // `-map 0 -map 1` demek, ayrı inen video dosyasındaki boş ses
+                // izini de taşımak olurdu.
+                args.push("-map".into());
+                args.push("0:v:0".into());
+                args.push("-map".into());
+                args.push("1:a:0".into());
+            }
+            args.push("-c".into());
+            args.push("copy".into());
+        }
+
+        // `-vn`: girdi tek başına ses dosyası olabileceği gibi tam bir video da
+        // olabiliyor (kullanıcı inmiş bir videodan sesi çıkarmak istediğinde).
+        // İkisinde de doğru olan video izini düşürmek.
+        MuxMode::AudioCopy => {
+            args.push("-vn".into());
+            args.push("-c:a".into());
+            args.push("copy".into());
+        }
+
+        MuxMode::AudioMp3 { kbps } => {
+            args.push("-vn".into());
+            args.push("-c:a".into());
+            args.push("libmp3lame".into());
+            args.push("-b:a".into());
+            args.push(format!("{kbps}k"));
+        }
     }
 
-    args.push("-c".into());
-    args.push("copy".into());
     // İndeks dosyanın başına: yarım inen dosya bile oynatılabiliyor ve
     // tarayıcıda akıtılabiliyor.
-    args.push("-movflags".into());
-    args.push("+faststart".into());
+    if faststart_uygun(&req.output) {
+        args.push("-movflags".into());
+        args.push("+faststart".into());
+    }
     args.push(req.output.to_string_lossy().into_owned());
     args
 }
@@ -177,10 +277,7 @@ mod tests {
 
     #[test]
     fn tek_girdi_yalnizca_kap_degistiriyor() {
-        let args = build_args(&MuxRequest {
-            inputs: vec![PathBuf::from("a.ts")],
-            output: PathBuf::from("a.mp4"),
-        });
+        let args = build_args(&MuxRequest::video(vec![PathBuf::from("a.ts")], PathBuf::from("a.mp4")));
         assert!(args.contains(&"-c".to_string()));
         assert!(args.contains(&"copy".to_string()));
         // Tek girdide akış eşlemesi yok: ffmpeg varsayılanı zaten doğru.
@@ -191,10 +288,7 @@ mod tests {
 
     #[test]
     fn iki_girdi_ses_ve_videoyu_esliyor() {
-        let args = build_args(&MuxRequest {
-            inputs: vec![PathBuf::from("v.m4s"), PathBuf::from("a.m4s")],
-            output: PathBuf::from("film.mp4"),
-        });
+        let args = build_args(&MuxRequest::video(vec![PathBuf::from("v.m4s"), PathBuf::from("a.m4s")], PathBuf::from("film.mp4")));
         assert_eq!(args.iter().filter(|a| *a == "-i").count(), 2);
         let esleme: Vec<&String> = args
             .iter()
@@ -205,11 +299,68 @@ mod tests {
     }
 
     #[test]
-    fn etkilesim_kapali() {
+    fn ses_kopyalama_videoyu_dusuruyor_ve_kodlamiyor() {
         let args = build_args(&MuxRequest {
-            inputs: vec![PathBuf::from("a.ts")],
-            output: PathBuf::from("a.mp4"),
+            inputs: vec![PathBuf::from("ses.m4s")],
+            output: PathBuf::from("sarki.m4a"),
+            mode: MuxMode::AudioCopy,
         });
+        assert!(args.contains(&"-vn".to_string()));
+        assert!(args.contains(&"copy".to_string()));
+        // Kodlayıcı adı geçmemeli: kayıpsız çıkarmanın tek anlamı bu.
+        assert!(!args.iter().any(|a| a.contains("lame")));
+        assert_eq!(args.last().unwrap(), "sarki.m4a");
+    }
+
+    #[test]
+    fn mp3_kipi_kodlayici_ve_bit_hizi_veriyor() {
+        let args = build_args(&MuxRequest {
+            inputs: vec![PathBuf::from("ses.m4s")],
+            output: PathBuf::from("sarki.mp3"),
+            mode: MuxMode::AudioMp3 { kbps: 192 },
+        });
+        assert!(args.contains(&"-vn".to_string()));
+        assert!(args.contains(&"libmp3lame".to_string()));
+        assert!(args.contains(&"192k".to_string()));
+        // MP3 yeniden kodlanıyor; `copy` sızarsa bit hızı sessizce yok sayılırdı.
+        assert!(!args.contains(&"copy".to_string()));
+    }
+
+    #[test]
+    fn faststart_yalnizca_mp4_ailesinde() {
+        // MP3/Opus çıktısında `-movflags` ffmpeg'i hatayla durduruyor.
+        for (cikti, beklenen) in [("a.mp4", true), ("a.m4a", true), ("a.mp3", false), ("a.opus", false)] {
+            let args = build_args(&MuxRequest {
+                inputs: vec![PathBuf::from("g.m4s")],
+                output: PathBuf::from(cikti),
+                mode: MuxMode::AudioCopy,
+            });
+            assert_eq!(args.contains(&"-movflags".to_string()), beklenen, "{cikti}");
+        }
+    }
+
+    #[test]
+    fn ses_uzantisi_codecs_alanindan_geliyor() {
+        assert_eq!(audio_extension(Some("mp4a.40.2")), "m4a");
+        assert_eq!(audio_extension(Some("opus")), "opus");
+        assert_eq!(audio_extension(Some("mp4a.69")), "mp3");
+        assert_eq!(audio_extension(Some("ec-3")), "eac3");
+        assert_eq!(audio_extension(Some("FLAC")), "flac");
+        // Bilinmeyen ya da eksik: akış videosunda ezici çoğunluk AAC.
+        assert_eq!(audio_extension(Some("bilinmeyen")), "m4a");
+        assert_eq!(audio_extension(None), "m4a");
+    }
+
+    #[test]
+    fn ac3_ile_eac3_karismiyor() {
+        // "ec-3" içinde "c-3" var; sıralama yanlış olsaydı ikisi de ac3 çıkardı.
+        assert_eq!(audio_extension(Some("ac-3")), "ac3");
+        assert_eq!(audio_extension(Some("ec-3")), "eac3");
+    }
+
+    #[test]
+    fn etkilesim_kapali() {
+        let args = build_args(&MuxRequest::video(vec![PathBuf::from("a.ts")], PathBuf::from("a.mp4")));
         // `-nostdin` olmazsa ffmpeg üzerine yazma onayı bekleyip asılı kalabilir.
         assert!(args.contains(&"-nostdin".to_string()));
         assert!(args.contains(&"-y".to_string()));

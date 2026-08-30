@@ -1604,7 +1604,7 @@ impl DownloadManager {
             }
             media::mux::run(
                 Path::new(&ff.path),
-                &media::mux::MuxRequest { inputs, output: mux_part.clone() },
+                &media::mux::MuxRequest::video(inputs, mux_part.clone()),
             )
             .await?;
 

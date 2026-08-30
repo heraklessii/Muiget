@@ -80,8 +80,13 @@ Bu net bir sınırdır ve değişmeyecektir:
 
 - ❌ Sitelerin indirme limitlerini, kotalarını veya hız sınırlarını **aşmaz**.
 - ❌ Rapidgator, Mega gibi premium link servislerinin kısıtlarını **atlatmaz**.
-- ❌ Herhangi bir sitenin kullanım şartlarını ihlal eden "bypass" özelliği
-  içermez.
+- ⚠️ **Bazı siteler indirmeyi kullanım şartlarında yasaklıyor** — YouTube başta.
+  Muiget burada teknik bir koruma aşmıyor: imzalı adresi tarayıcının kendisi
+  üretip zaten istiyor, uzantı yalnızca o adresi görüyor. Şifre çözme, imza
+  kırma yok. Ama **indirmenin kendisi** o sitelerin şartlarına aykırı olabilir
+  ve sorumluluk kullanıcıda. Bu yüzden YouTube yakalama ayrı bir izin arkasında,
+  varsayılan kapalı, ve Chrome Web Store'a gidecek derlemede hiç yok
+  (bkz. [karar #27](docs/decisions.md)).
 - ❌ **DRM korumalı video indirmez.** HLS'in `AES-128` parça şifrelemesi
   destekleniyor — anahtar manifestin gösterdiği adresten herkese açık veriliyor
   ve tarayıcıdaki oynatıcı da aynısını yapıyor. Buna karşılık `SAMPLE-AES`
@@ -90,8 +95,9 @@ Bu net bir sınırdır ve değişmeyecektir:
 - ❌ Canlı yayın kaydetmez.
 
 Buradaki "hızlı indirme" yalnızca meşru HTTP seviyesinde optimizasyon demektir:
-paralel Range istekleri, resume ve bant genişliği yönetimi. Bu sınırı aşmayı
-hedefleyen özellik talepleri kabul edilmez.
+paralel Range istekleri, resume ve bant genişliği yönetimi. Yukarıdaki ❌
+maddeleri değişmeyecek; şifreleme kırmayı, kota aşmayı ya da ödeme duvarı
+atlatmayı hedefleyen özellik talepleri kabul edilmez.
 
 ## Ekran Görüntüsü
 

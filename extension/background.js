@@ -220,6 +220,112 @@ function dosyaAdi(yol) {
 
 const MANIFEST_DESENI = /\.(m3u8|mpd)(\?|#|$)/i;
 
+/** DASH mi HLS mi: yakalama anında ayrılıyor ki adres normalize
+    edildikten sonra uzantıya bakmak gerekmesin. */
+const MPD_DESENI = /\.mpd(\?|#|$)/i;
+
+/* ---------------------------------------------------------------------------
+ * Doğrudan medya yakalama — derleme bayrağı
+ *
+ * Bazı siteler (YouTube başta) manifest kullanmıyor: oynatıcı, sayfaya gömülü
+ * bir listeden aldığı imzalı adresleri byte aralıklarıyla çekiyor. Ağdan hiçbir
+ * `.m3u8`/`.mpd` geçmediği için yukarıdaki süzgeç bunları **hiçbir zaman**
+ * göremiyor.
+ *
+ * Neden bir bayrağın arkasında:
+ *
+ * Chrome Web Store'un geliştirici politikası, telifli içeriğin indirilmesini
+ * "kolaylaştıran" uzantıları yasaklıyor ve YouTube'u adıyla sayıyor — uzantının
+ * nasıl kurgulandığına bakmaksızın. "Uzantı sadece adresi bulur, indirmeyi
+ * masaüstü yapar" ayrımı da kurtarmıyor. IDM'in mağazadaki uzantısında YouTube
+ * bu yüzden kapalı.
+ *
+ * Bu yüzden tek sabit:
+ *   GitHub'dan inen paket       -> true
+ *   Web Store'a gidecek derleme -> false
+ *
+ * Kaynak açık olduğu için gizlemenin anlamı yok; kapatmak da tek satır.
+ *
+ * **Sınır:** burada imza çözülmüyor, şifre kırılmıyor, DRM'e dokunulmuyor.
+ * Yakalanan adresi tarayıcının kendisi üretip zaten istemiş durumda; uzantı
+ * yalnızca o adresi görüyor. DRM korumalı içerik bu yolla da inmiyor: parçalar
+ * şifreli geliyor ve masaüstü tarafı reddediyor (karar #25).
+ * ------------------------------------------------------------------------- */
+
+export const DOGRUDAN_MEDYA_YAKALAMA = true;
+
+/** YouTube akışının türü, `mime` sorgu alanından. */
+const YT_TUR = (u) => {
+  const mime = decodeURIComponent(u.searchParams.get('mime') ?? '');
+  if (mime.startsWith('audio')) return 'ses';
+  if (mime.startsWith('video')) return 'video';
+  return 'medya';
+};
+
+/** Hem video hem ses taşıyan eski (progressive) itag'lar. */
+const YT_BIRLESIK = new Set(['18', '22', '37', '59', '17', '36']);
+
+/** Yakalanacak doğrudan medya adresleri. */
+const DOGRUDAN_KURALLAR = [
+  {
+    ad: 'YouTube',
+    eslesir: (u) =>
+      /(^|\.)googlevideo\.com$/i.test(u.hostname) && u.pathname === '/videoplayback',
+
+    /* Oynatıcı dosyayı yüzlerce küçük istekte alıyor ve her isteğin adresinde
+       o parçaya özel alanlar var. Bunlar temizlenmezse indirilen adres tek bir
+       parçayı verir — tam dosyayı değil. */
+    normalize: (u) => {
+      for (const alan of ['range', 'rn', 'rbuf', 'ump', 'srfvp']) u.searchParams.delete(alan);
+      return u;
+    },
+
+    /* Aynı akışın kimliği `itag`: çözünürlük/kodek kombinasyonunu o belirliyor.
+       Tekilleştirme buna göre yapılmazsa liste tek videonun parçalarıyla dolar
+       ve kullanıcı ses izini hiç göremez. */
+    kimlik: (u) => `youtube:${u.searchParams.get('itag') ?? u.pathname}`,
+
+    etiket: (u) => {
+      const tur = YT_TUR(u);
+      const itag = u.searchParams.get('itag');
+      return itag ? `YouTube · ${tur} · itag ${itag}` : `YouTube · ${tur}`;
+    },
+
+    /* Uyarlanır akışta video ve ses **ayrı** iniyor: video itag'ı tek başına
+       indirilirse sessiz bir dosya çıkıyor. Karar #25 bunu açıkça yasaklıyor
+       ("sessiz video teslim etmek, hata vermekten kötü"), o yüzden arayüz
+       uyarabilsin diye işaretleniyor. Eski birleşik itag'lar (18 gibi) hem
+       video hem ses taşıyor; onlarda mime `video/mp4` ama sessiz değiller —
+       bu yüzden yalnızca `itag`i bilinen uyarlanır akışlar işaretleniyor. */
+    sessiz: (u) => YT_TUR(u) === 'video' && !YT_BIRLESIK.has(u.searchParams.get('itag')),
+  },
+];
+
+/** Adres doğrudan bir medya akışı mı? Değilse `null`. */
+function dogrudanEslesme(url) {
+  if (!DOGRUDAN_MEDYA_YAKALAMA) return null;
+
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+
+  for (const kural of DOGRUDAN_KURALLAR) {
+    if (!kural.eslesir(u)) continue;
+    const temiz = kural.normalize(new URL(url));
+    return {
+      url: temiz.toString(),
+      tur: kural.ad,
+      etiket: kural.etiket(u),
+      kimlik: kural.kimlik(u),
+      sessiz: kural.sessiz?.(u) ?? false,
+    };
+  }
+  return null;
+}
+
 /** Sekme başına saklanan en fazla adres. Bir oynatıcı kalite değiştirdikçe
     yeni manifest istiyor; sınırsız biriktirmenin kimseye faydası yok. */
 const VIDEO_SINIRI = 12;
@@ -229,17 +335,40 @@ const videoAnahtari = (tabId) => `video:${tabId}`;
 function videoYakala(details) {
   // `tabId < 0`: sekmeye ait olmayan istek (uzantı, service worker).
   if (details.tabId < 0) return;
-  if (!MANIFEST_DESENI.test(details.url)) return;
-  void videoKaydet(details.tabId, details.url);
+
+  if (MANIFEST_DESENI.test(details.url)) {
+    void videoKaydet(details.tabId, {
+      url: details.url,
+      tur: MPD_DESENI.test(details.url) ? 'DASH' : 'HLS',
+      kimlik: details.url,
+    });
+    return;
+  }
+
+  const dogrudan = dogrudanEslesme(details.url);
+  if (dogrudan) void videoKaydet(details.tabId, dogrudan);
 }
 
-async function videoKaydet(tabId, url) {
+async function videoKaydet(tabId, giris) {
   const anahtar = videoAnahtari(tabId);
   const kayit = await chrome.storage.session.get(anahtar);
   const liste = kayit[anahtar] ?? [];
-  if (liste.some((v) => v.url === url)) return;
 
-  liste.unshift({ url, at: Date.now() });
+  /* Tekilleştirme adrese değil **kimliğe** göre: YouTube'da aynı akışın her
+     parçası farklı bir adres veriyor (`rn` sayacı her istekte artıyor) ama
+     hepsi aynı `itag`. Adrese bakılsaydı liste tek videonun parçalarıyla
+     dolardı. Manifestlerde kimlik zaten adresin kendisi. */
+  const kimlik = giris.kimlik ?? giris.url;
+  if (liste.some((v) => (v.kimlik ?? v.url) === kimlik)) return;
+
+  liste.unshift({
+    url: giris.url,
+    tur: giris.tur,
+    etiket: giris.etiket,
+    sessiz: giris.sessiz ?? false,
+    kimlik,
+    at: Date.now(),
+  });
   await chrome.storage.session.set({ [anahtar]: liste.slice(0, VIDEO_SINIRI) });
 
   // Sekmeye özel rozet: geçici "✓ / !" rozetleri genel olduğu için

@@ -878,3 +878,85 @@ kapalı). Açıldığında arka plan `.m3u8`/`.mpd` isteklerini görüp sekme ba
 - Uzantı dosya adı **göndermiyor**: bir manifestin adı (`master.m3u8`) diskte
   `master.mp4` olurdu. Masaüstü tarafı adı manifest adresinden türetiyor ve
   `master`/`index` gibi anlamsız gövdeleri atlıyor.
+
+---
+
+## 27. YouTube (manifestsiz) yakalama — derleme bayrağının arkasında
+
+**Bağlam:** Kullanıcı YouTube'da uzantının hiçbir şey bulamadığını bildirdi.
+Sebep hata değildi: [karar #26](#26)'nın süzgeci yalnızca `.m3u8`/`.mpd`
+arıyor, YouTube ise normal videolarda manifest kullanmıyor. Oynatıcı, sayfaya
+gömülü `streamingData` listesinden aldığı `googlevideo.com/videoplayback`
+adreslerini byte aralıklarıyla çekiyor; ağdan geçen bir manifest yok.
+
+**Karar:** Manifest süzgecinin yanına **doğrudan medya** kuralları eklendi
+(ilki YouTube). Yakalama, `background.js`'teki tek bir sabite bağlı:
+`DOGRUDAN_MEDYA_YAKALAMA`. GitHub'dan inen pakette `true`, Chrome Web Store'a
+gidecek derlemede `false`.
+
+**Gerekçe:**
+
+- **Neden bayrak:** Chrome Web Store geliştirici politikası, telifli içeriğin
+  indirilmesini "kolaylaştıran" uzantıları yasaklıyor ve YouTube'u adıyla
+  sayıyor — *uzantının nasıl kurgulandığına bakmaksızın*. "Uzantı yalnızca
+  adresi bulur, indirmeyi masaüstü yapar" ayrımı (ki Muiget'in mimarisi tam bu)
+  kurtarmıyor. IDM'in mağazadaki uzantısında YouTube bu yüzden kapalı.
+  `docs/tasks.md`'deki "Chrome Web Store yayını" hedefiyle YouTube desteği
+  doğrudan çakışıyordu; bayrak ikisini de açık tutuyor. Kaynak açık olduğu
+  için gizlemenin anlamı yok, kapatmak da tek satır.
+
+- **Sınırın neresinde durduğu:** burada imza çözülmüyor, şifre kırılmıyor,
+  DRM'e dokunulmuyor. `videoplayback` adresindeki `n`/`sig` alanlarını
+  tarayıcının kendi oynatıcısı üretiyor ve adresi zaten istiyor; uzantı yalnızca
+  o adresi görüyor. Alternatif yol — YouTube'un `base.js`'inden deşifre
+  fonksiyonunu çıkarıp çalıştırmak — **reddedildi**: o gerçekten bir teknik
+  koruma aşma olurdu, üstelik YouTube onu düzenli değiştirdiği için sürekli
+  kırılan bir bakım yükü getirirdi.
+  README'deki "hiçbir kullanım şartını ihlal etmez" cümlesi bu kararla birlikte
+  düzeltildi; artık ToS sorumluluğunun kullanıcıda olduğunu açıkça yazıyor.
+
+- **Adres normalize ediliyor:** `range`, `rn`, `rbuf` gibi parçaya özel alanlar
+  siliniyor. Silinmezse indirilen adres tek bir parçayı verir, tam dosyayı
+  değil.
+
+- **Tekilleştirme adrese değil `itag`e göre:** aynı akışın her parça isteği
+  farklı bir adres üretiyor (`rn` sayacı artıyor). Adrese bakılsaydı 12'lik
+  liste tek videonun parçalarıyla dolar, kullanıcı ses izini hiç göremezdi.
+
+- **Sessiz akış işaretleniyor:** uyarlanır yayında video ve ses ayrı iniyor;
+  video itag'ı tek başına indirilirse sessiz dosya çıkıyor. [Karar #25](#25)
+  bunu açıkça yasakladığı için popup, düğmeye basılmadan önce "sessiz — ses
+  ayrı iniyor" uyarısını gösteriyor. Eski birleşik itag'lar (18, 22…) hem video
+  hem ses taşıdığı için işaretlenmiyor.
+
+**Açık kalan:** video+ses çiftini otomatik eşleyip ffmpeg ile birleştirmek
+henüz yok. Bugün kullanıcı iki akışı ayrı indirip elle birleştiriyor; ses tek
+başına indirildiğinde ([karar #28](#28)) zaten doğrudan kullanılabilir dosya
+çıkıyor.
+
+---
+
+## 28. Ses indirmede varsayılan biçim: kayıpsız çıkarma, MP3 seçenek
+
+**Bağlam:** "MP3 desteği de ekleyelim" talebi. Kullanıcıların çoğu video
+sitelerinden ses almak için harici sitelere gidiyor.
+
+**Karar:** `mux.rs`'e iki yeni kip eklendi. Varsayılan `AudioCopy`: ses izi
+`-vn -c:a copy` ile **olduğu gibi** çıkarılıyor (`.m4a`/`.opus`, kaynağın
+kodekine göre). `AudioMp3 { kbps }` ise `libmp3lame` ile yeniden kodluyor ve
+yalnızca kullanıcı isterse çalışıyor.
+
+**Gerekçe:**
+- Akış videosunun sesi zaten AAC ya da Opus — yani çoktan kayıplı
+  sıkıştırılmış. MP3'e çevirmek **ikinci bir kayıplı geçiş** demek: kalite
+  düşüyor ve işlem dakikalar sürüyor. Kabı değiştirip içeriğe dokunmamak hem
+  anında bitiyor hem kayıpsız.
+- Bu, `build_args`'ın en baştaki `-c copy` ilkesiyle de tutarlı: "bir indirme
+  yöneticisi kullanıcının medyasını yeniden kodlamaz." MP3 bu ilkeden bilinçli
+  bir sapma ve o yüzden varsayılan değil, seçenek.
+- MP3 yine de duruyor çünkü hâlâ her cihazda çalan tek biçim.
+- **Çıktı uzantısı `codecs` alanından türetiliyor** (`audio_extension`). Kabı
+  yanlış seçmek `-c copy`yi çalışmaz hale getiriyor: AAC'yi `.opus` diye
+  yazmaya kalkınca ffmpeg akışı ogg'a koyamayıp hata veriyor.
+- `+faststart` yalnızca MP4 ailesinde ekleniyor; `.mp3`/`.opus` çıktısında
+  ffmpeg onu geçersiz seçenek sayıp duruyor.

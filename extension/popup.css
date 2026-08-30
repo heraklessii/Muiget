@@ -134,6 +134,15 @@ body {
   flex: 0 0 auto;
 }
 
+/* Sessiz akış uyarısı: türün yanında, ama dikkat çekmesi gerekiyor —
+   kullanıcı bunu görmezse sessiz bir dosya indirip nedenini anlamıyor. */
+.oge__uyari {
+  font-size: 10px;
+  color: var(--warn, #e0a34a);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .oge button {
   flex: 0 0 auto;
   background: transparent;

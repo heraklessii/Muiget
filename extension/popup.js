@@ -208,7 +208,8 @@ async function videolariListele(sekme) {
   const videolar = sonuc.videos ?? [];
   if (videolar.length === 0) {
     videolarEl.innerHTML =
-      '<p class="bos">Bu sayfada video yayını görülmedi. Oynatıcıyı başlatıp tekrar bakın.</p>';
+      '<p class="bos">Bu sayfada video yayını görülmedi. Oynatıcıyı başlatıp tekrar bakın — ' +
+      'yayın adresi ancak video oynamaya başlayınca isteniyor.</p>';
     return;
   }
 
@@ -221,12 +222,25 @@ async function videolariListele(sekme) {
 
     const ad = document.createElement('span');
     ad.className = 'oge__ad';
-    ad.textContent = videoAdi(video.url);
+    // Doğrudan yakalanan akışlarda dosya adı yok (adres bir sorgu dizesi);
+    // yakalama anında üretilen etiket tek anlamlı ad.
+    ad.textContent = video.etiket ?? videoAdi(video.url);
     ad.title = video.url;
 
     const tur = document.createElement('span');
     tur.className = 'oge__tur';
-    tur.textContent = /\.mpd(\?|#|$)/i.test(video.url) ? 'DASH' : 'HLS';
+    // Tür yakalama anında belirleniyor; `tur` yoksa kayıt eski sürümden.
+    tur.textContent = video.tur ?? 'HLS';
+
+    // Sessiz akış: video izi tek başına indirilirse ses olmuyor. Karar #25
+    // gereği bunu indirme anında değil, **düğmeye basmadan önce** söylemek
+    // gerekiyor; sessiz dosyayı teslim edip sonra açıklamak en kötüsü.
+    if (video.sessiz) {
+      const uyari = document.createElement('span');
+      uyari.className = 'oge__uyari';
+      uyari.textContent = 'sessiz — ses ayrı iniyor';
+      satir.appendChild(uyari);
+    }
 
     const dugme = document.createElement('button');
     dugme.textContent = 'İndir';
