@@ -241,6 +241,10 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
 - [x] **Yayın iş akışı uçtan uca sınandı.** `v0.1.1` etiketiyle iş akışı
       derleyip GitHub Release'ini kendisi oluşturdu ve iki kurulum paketini
       yükledi. İzin sorunu (`default_workflow_permissions`) çözülmüş durumda.
+- [x] **v0.1.3 yayınlandı.** İlk kez video akışı içeren paket: HLS/DASH
+      indirme (karar #25) ve uzantıda video yakalama (#26). Uzantının
+      `manifest.json` sürümü de aynı numaraya çekildi — üç yayın boyunca
+      0.1.0'da kalmıştı, bu yüzden Chrome yüklü uzantıyı güncel sayıyordu.
 - [ ] **CI paketi ile yerel derlemenin SHA-256'sı tutmuyor** — beklenen.
       v0.1.0'da tutmasının sebebi paketin elle yüklenen yerel derleme
       olmasıydı. Rust/NSIS yeniden üretilebilir çıktı vermiyor (gömülü yollar,

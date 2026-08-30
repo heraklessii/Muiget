@@ -221,7 +221,7 @@ var. 292 test geçiyor. Uygulama gerçek penceresinde uçtan uca doğrulandı (8
 dosya, 8 paralel segment, SHA-256 birebir aynı) ve 10. oturumda akış indirmesi
 de aynı yöntemle doğrulandı (yerel VOD playlisti, parçalar paralel indi, SHA-256
 birebir). Chrome köprüsü de Chrome'un gerçek çağrısıyla doğrulandı; son yayın
-v0.1.2.
+v0.1.3.
 
 IDM'e yaklaştıran eklemeler: host kotasının indirmeler arasında adil
 bölüşülmesi (karar #17), kategori klasörleri (#18), vekil sunucu (#19),

@@ -7,6 +7,48 @@ Format: Tarih, yapılanlar, kararlar, sıradaki adım.
 
 ---
 
+## 2026-08-31 (11. oturum) — Faz 6'yı Yayına Çıkarma, v0.1.3
+
+Bu oturum kod değil **dağıtım** işiydi. İlker sordu: GitHub'daki release,
+Pages ve README bilgisayardakiyle aynı mı?
+
+Değildi. Faz 6'nın tamamı (`src-tauri/src/media/`, 28 değişmiş dosya, 2158
+satır) yalnızca diskteydi — commit bile edilmemişti. Dolayısıyla GitHub'daki
+README hâlâ "158 test" diyordu ve tanıtım sayfası **üç yayın gerideydi**:
+rozet `v0.1.0`, "143 otomatik test", video akışından hiç söz yok.
+
+### Yapılanlar
+
+- `site/index.html` tazelendi: rozet v0.1.2 (sonra 0.1.3), test sayısı 292,
+  yeni "Video akışı (HLS/DASH)" kartı, tarayıcı kartına video yakalama,
+  "Ne yapmaz" listesine DRM ve canlı yayın maddeleri, kuruluma Linux/macOS
+  paketleri notu.
+- Faz 6'nın tamamı tek commit'te `main`'e itildi. Pages iş akışı çalıştı,
+  site güncellendi.
+- Sürüm yedi dosyada 0.1.3'e çekildi (beş uygulama dosyası + uzantı).
+
+### Uzantı sürümü: 0.1.0 -> 0.1.3
+
+Uzantının `manifest.json`'ı üç uygulama yayını boyunca 0.1.0'da kalmıştı.
+Bu sessiz bir hataydı: Chrome yüklü uzantıyı sürüm numarasından takip ediyor,
+numara artmayınca `webRequest` video yakalama gelse bile "güncel" sayıyordu.
+
+Ayrı bir numara dizisi tutmak yerine uygulamayla **aynı numara** seçildi:
+uzantı bu depodan geliyor ve uygulama olmadan hiçbir işe yaramıyor; ayrı
+numaralar "hangi uzantı hangi sürümle çalışır" sorusunu bedava doğuruyordu.
+
+Bu arada `extension/README.md`deki "bağlı · v0.1.0" doğrulama adımı da
+düzeltildi: oradaki numara **uygulamanın** sürümü (köprünün `pong` yanıtından
+geliyor), uzantının değil. Sabit yazıldığı için her yayında bayatlıyordu;
+artık ne olduğu da yazıyor.
+
+### Sıradaki
+
+Değişmedi: gerçek dünya doğrulaması ve video akışının sahada denenmesi. İkisi
+de İlker'in makinesinde yapılacak iş.
+
+---
+
 ## 2026-08-31 (10. oturum) — HLS/DASH Video İndirme (Faz 6)
 
 İlker: "Sıradaki en büyük iş HLS/DASH video indirme — IDM'i bugün satan özellik

@@ -30,7 +30,8 @@ köprüyü başlatabiliyor.
 
 ### 3. Doğrula
 
-Uzantı simgesine tıkla. Sağ üstte **bağlı · v0.1.0** yazıyorsa köprü çalışıyor.
+Uzantı simgesine tıkla. Sağ üstte **bağlı · v0.1.3** yazıyorsa köprü çalışıyor
+(numara uygulamanın sürümü — köprü onu bildiriyor, uzantınınkini değil).
 
 ## Kullanım
 
