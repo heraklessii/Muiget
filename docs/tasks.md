@@ -195,11 +195,14 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
 - [x] CI kurulumu (`.github/workflows/ci.yml`): ubuntu'da `npm run build`,
       windows'ta `cargo test` + `cargo clippy -D warnings`. Rust işi arayüzü de
       derliyor, çünkü `generate_context!` derleme anında `dist/` klasörünü arıyor.
-- [ ] **CI'da zamanlamaya bağlı test riski.** `duraklat_ve_devam_et_dosyayi_bozmuyor`
-      ve benzerleri 80–120 ms bekleyip indirmeyi akarken yakalıyor. Yerelde
-      kararlı ama yavaş bir runner'da "duraklatmadan önce hiç veri inmemiş"
-      diye patlayabilir. İlk yeşil koşudan sonra birkaç çalıştırma izlenmeli;
-      titrerse eşikler yavaş sunucunun parça aralığına göre büyütülmeli.
+- [x] **CI'da zamanlamaya bağlı test riski — gerçekleşti ve kapatıldı.**
+      Öngörü tuttu: `oturum_sonrasi_liste_diskten_geri_yukleniyor`, GitHub'ın
+      Windows runner'ında tam olarak "duraklatmadan önce veri inmemiş" diye
+      düştü (9. oturum, koşu #9). Çözüm eşikleri büyütmek **değil**: sabit
+      `sleep` yerine `veri_akmaya_baslayinca()` yardımcısı, ilk byte inene
+      kadar (en fazla 20 sn) bekliyor. Beş çağrı yeri dönüştürüldü. Geriye
+      kalan iki 200 ms'lik bekleyiş bir olayın *olmamasını* sınıyor; onlar
+      yanlışlıkla geçebilir ama yanlışlıkla düşemez.
 - [x] `cargo clippy --all-targets` temiz (CI'a eklenmesi bekliyor)
 - [ ] **Arayüzün hiç otomatik testi yok.** Rust tarafı 198 testle korunuyor,
       `src/` tarafında sıfır. Artık orada gerçek mantık var: bağlam menüsünün

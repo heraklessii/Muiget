@@ -211,6 +211,41 @@ async fn tamamlanmayi_bekle(manager: &DownloadManager, id: &str) -> DownloadStat
     }
 }
 
+/// İndirme gerçekten akmaya başlayana kadar bekler ve inen byte sayısını döner.
+///
+/// Sabit `sleep(80ms)` + "bu arada veri inmiştir" varsayımının yerine geçti.
+/// O varsayım GitHub'ın Windows runner'ında tutmadı ve
+/// `oturum_sonrasi_liste_diskten_geri_yukleniyor` "duraklatmadan önce veri
+/// inmemiş" diye düştü — `docs/tasks.md`'de önceden not edilmiş risk.
+///
+/// Süreyi büyütmek yanlış çözüm olurdu: eşik ne kadar büyütülse daha yavaş bir
+/// makinede yine yetmeyebilir, hızlı makinede ise her koşu boşuna beklerdi.
+/// Burada beklenen olayın **kendisi** bekleniyor; hızlı makinede birkaç
+/// milisaniyede dönüyor, yavaşta gerektiği kadar bekliyor. Ayrıca indirmeyi
+/// mümkün olan en erken anda yakaladığı için "duraklatma bitmeden yetişmeli"
+/// tarafı da güvenceye giriyor.
+async fn veri_akmaya_baslayinca(manager: &DownloadManager, id: &str) -> u64 {
+    let son = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let snapshot = manager.get(id).expect("indirme kaydı kayboldu");
+        if snapshot.downloaded > 0 {
+            return snapshot.downloaded;
+        }
+        assert!(
+            snapshot.status.is_active(),
+            "indirme tek byte inmeden bitti: durum {:?}, hata {:?}",
+            snapshot.status,
+            snapshot.error
+        );
+        assert!(
+            tokio::time::Instant::now() < son,
+            "20 saniyede tek byte inmedi: durum {:?}",
+            snapshot.status
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 fn test_config(segments: usize) -> ManagerConfig {
     ManagerConfig {
         segments,
@@ -398,7 +433,8 @@ async fn bayat_meta_bastan_indirtiyor() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn duraklat_ve_devam_et_dosyayi_bozmuyor() {
     // Yavaş sunucu: 4 segment × 128 KB, parça başına 25 ms → indirme ~400 ms
-    // sürüyor. 80 ms'de duraklatmak indirmeyi kesin olarak akarken yakalıyor.
+    // sürüyor. İlk byte iner inmez duraklatıldığı için indirme kesin olarak
+    // akarken yakalanıyor.
     const BOYUT: usize = 512 * 1024;
     let icerik = beklenen_icerik(BOYUT);
     let sunucu = TestSunucusu::baslat(icerik.clone(), SunucuKipi::Yavas).await;
@@ -407,7 +443,7 @@ async fn duraklat_ve_devam_et_dosyayi_bozmuyor() {
     let manager = DownloadManager::new(test_config(4)).unwrap();
     let id = manager.start(sunucu.url("/duraklat.bin"), dir.path().to_path_buf()).unwrap();
 
-    tokio::time::sleep(Duration::from_millis(80)).await;
+    veri_akmaya_baslayinca(&manager, &id).await;
     manager.pause(&id).unwrap();
 
     let durum = tamamlanmayi_bekle(&manager, &id).await;
@@ -438,7 +474,7 @@ async fn iptal_edilen_indirme_dosya_birakmiyor() {
     let manager = DownloadManager::new(test_config(4)).unwrap();
     let id = manager.start(sunucu.url("/iptal.bin"), dir.path().to_path_buf()).unwrap();
 
-    tokio::time::sleep(Duration::from_millis(80)).await;
+    veri_akmaya_baslayinca(&manager, &id).await;
     manager.cancel(&id).unwrap();
     let durum = tamamlanmayi_bekle(&manager, &id).await;
     assert_eq!(durum, DownloadStatus::Cancelled, "iptal uygulanmadı");
@@ -559,6 +595,10 @@ async fn kuyrukta_bekleyen_indirme_duraklatilabiliyor() {
     assert_eq!(tamamlanmayi_bekle(&manager, &birinci).await, DownloadStatus::Completed);
 
     // Öndeki bittikten sonra kuyruk pompalandı; duraklatılan hâlâ duraklamış olmalı.
+    //
+    // Buradaki sabit bekleyiş `veri_akmaya_baslayinca` ile değiştirilemez ve
+    // kırılgan da değil: sınanan şey bir olayın **olmaması**. Yavaş bir makinede
+    // en fazla yanlışlıkla geçer, yanlışlıkla düşmez.
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(
         manager.get(&bekleyen).unwrap().status,
@@ -589,7 +629,7 @@ async fn oturum_sonrasi_liste_diskten_geri_yukleniyor() {
         let manager = DownloadManager::new(test_config(4)).unwrap();
         let id = manager.start(url.clone(), dir.path().to_path_buf()).unwrap();
 
-        tokio::time::sleep(Duration::from_millis(120)).await;
+        veri_akmaya_baslayinca(&manager, &id).await;
         manager.pause(&id).unwrap();
         assert_eq!(tamamlanmayi_bekle(&manager, &id).await, DownloadStatus::Paused);
 
@@ -640,7 +680,7 @@ async fn geri_yuklenen_indirme_ikinci_kez_eklenemiyor() {
     {
         let manager = DownloadManager::new(test_config(4)).unwrap();
         let id = manager.start(url.clone(), dir.path().to_path_buf()).unwrap();
-        tokio::time::sleep(Duration::from_millis(120)).await;
+        veri_akmaya_baslayinca(&manager, &id).await;
         manager.pause(&id).unwrap();
         assert_eq!(tamamlanmayi_bekle(&manager, &id).await, DownloadStatus::Paused);
     }
@@ -689,7 +729,9 @@ async fn tumunu_duraklat_ve_tumunu_surdur() {
         })
         .collect();
 
-    tokio::time::sleep(Duration::from_millis(120)).await;
+    // İlki akmaya başlayınca hepsi başlamış sayılır: kuyruk `pump()` ile tek
+    // geçişte dolduruluyor, üçü de aynı anda kayda giriyor.
+    veri_akmaya_baslayinca(&manager, &idler[0]).await;
 
     let duraklatilan = manager.pause_all();
     assert_eq!(duraklatilan, 3, "çalışan ve kuyrukta bekleyenlerin hepsi duraklatılmalı");
@@ -699,6 +741,7 @@ async fn tumunu_duraklat_ve_tumunu_surdur() {
     }
 
     // Duraklamış hâlde kalmalı: kuyruk kendiliğinden hiçbirini başlatmamalı.
+    // Sabit bekleyiş burada da bilinçli — bkz. yukarıdaki not.
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(
         manager.list().iter().all(|d| d.status == DownloadStatus::Paused),

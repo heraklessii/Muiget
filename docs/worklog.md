@@ -127,6 +127,35 @@ Bu arada öğrenilen bir tuzak: `cargo run` ile açılan debug binary arayüzü
 boş kalıyor ve **arayüz kodu hiç çalışmıyor**. Rust tarafını böyle denemek
 geçerli, arayüz tarafı için `npm run tauri dev` şart.
 
+### CI kırıldı: öngörülen kırılgan test gerçekten düştü
+
+Push'tan sonra CI'ın Windows test işi düştü — ama Linux `cargo check` işi
+(bu oturumda eklenen) ve arayüz işi geçti.
+
+Düşen test `oturum_sonrasi_liste_diskten_geri_yukleniyor`, mesaj
+**"duraklatmadan önce veri inmemiş"**. Bu `docs/tasks.md`'de kelimesi kelimesine
+öngörülmüş bir riskti: birkaç test sabit `sleep(80–120 ms)` atıp "bu arada veri
+inmiştir" varsayıyordu. Yavaş runner'da o varsayım tutmadı; yeni testlerin
+getirdiği ek yük muhtemelen dengeyi bozdu.
+
+Yerelde sekiz koşuda (yük altında, iki çekirdeğe kısıtlanmış, `--test-threads=2`
+ile) tekrar üretilemedi — kırılgan testin tanımı da bu zaten.
+
+**Çözüm eşikleri büyütmek değil.** Ne kadar büyütülse daha yavaş bir makinede
+yine yetmeyebilir, hızlı makinede ise her koşu boşuna beklerdi. Bunun yerine
+`veri_akmaya_baslayinca()` yardımcısı eklendi: indirme ilk byte'ı alana kadar
+(en fazla 20 sn, 10 ms'de bir yoklayarak) bekliyor, sonra duraklatma/iptal
+uygulanıyor. Beş çağrı yeri dönüştürüldü. Yan fayda: indirme artık mümkün olan
+**en erken** anda yakalanıyor, yani "duraklatma bitmeden yetişmeli" tarafı da
+sağlamlaştı.
+
+Geriye kalan iki 200 ms'lik bekleyiş bilerek duruyor: onlar bir olayın
+*olmamasını* sınıyor (duraklatılan indirme kendiliğinden başlamamalı) ve
+yanlışlıkla geçebilir ama yanlışlıkla düşemez. Koda not olarak yazıldı.
+
+CI loglarını okumak giriş istiyor; hata İlker'in yapıştırmasıyla görüldü.
+Public olan check-run annotation'ı yalnızca "exit code 1" diyor.
+
 ### Sayılar
 
 198 test (179 birim + 19 uçtan uca), `cargo clippy --all-targets -D warnings`
