@@ -7,6 +7,138 @@ Format: Tarih, yapılanlar, kararlar, sıradaki adım.
 
 ---
 
+## 2026-09-01 (13. oturum) — Altyazı (Faz 6), Sessiz Bir Bozulma Hatası, Olay Biriktirme
+
+İstek: "geliştirmeye devam et, hataları düzelt, optimize et." Üçü de yapıldı;
+sıra da bu: önce bulunan hata, sonra özellik, sonra optimizasyon.
+
+### 1. Hata: ses sayacına yazılan video parçaları (sessiz bozulma)
+
+Kod okurken çıktı, bir şikâyetten değil. `supervise_media` hangi parçanın
+indiğini süpervizörde duran bir `AtomicBool` ile takip ediyordu: boru hattı ses
+aşamasına geçerken bayrağı çeviriyor, ilerleme olayları ise **sınırsız bir
+kanaldan** akıyordu.
+
+Sorun ortada: bayrak çevrildiğinde videonun son olayları hâlâ kanalda bekliyor
+olabiliyor ve o olaylar ses sayacına yazılıyor. Yalnızca yanlış bir ilerleme
+çubuğu olsa küçük bir kusurdu — ama devam noktası (`.muiget`) da o sayaçlardan
+yazılıyor. Sürdürülen indirme ses dosyasını **video byte sayısına kadar**
+sıfırla doldurup üstüne yazacaktı: sessizce bozuk bir ses izi, ancak izlerken
+fark edilecek türden.
+
+Çözüm bayrağı iyileştirmek değil, kaldırmak oldu: rol artık olayın kendi alanı
+(`FetchEvent::SegmentWritten { role, .. }`). Kanalda ne kadar beklerse beklesin
+olay kime ait olduğunu kendisi söylüyor. Gerileme testi
+(`ilerleme_olaylari_kendi_rolunu_tasiyor`) boru hattını doğrudan çağırıp bütün
+olayların verilen rolü taşıdığını sınıyor — zamanlamaya bağlı bir yarışı
+zamanlamayla test etmeye çalışmak yerine yapıyı test ediyor.
+
+### 2. Altyazı desteği (karar #29)
+
+Faz 6'nın açık kalan maddesi kapandı. HLS `#EXT-X-MEDIA:TYPE=SUBTITLES` ve
+DASH `contentType="text"` artık ayrıştırılıyor, indiriliyor ve videonun yanına
+`film.tr.vtt` olarak yazılıyor.
+
+Asıl iş ayrıştırmada değil **birleştirmede**. Video parçalarında işe yarayan
+"uç uca ekle" (karar #25) burada geçersiz: her HLS altyazı parçası kendi başına
+tam bir WebVTT belgesi, yani her birinin başında `WEBVTT` satırı var. Art arda
+yazılan dosyada oynatıcı ikinci başlığı bir cue sanıyor. Yeni modül
+`media/vtt.rs` parçaları ayrıştırıp cue'ları tek bir belgede topluyor.
+
+İki incelik:
+
+- **Zaman ekseni.** HLS altyazısı `X-TIMESTAMP-MAP` ile MPEG-TS saatine
+  bağlanıyor ve o saat tipik olarak 900000'de (10 sn) başlıyor. Mutlak değeri
+  korumak, ffmpeg `.mp4`e çevirdiğinde altyazıyı 10 saniye kaydırırdı. İlk
+  parçanın offseti taban alınıyor.
+- **Yinelenen cue'lar.** Parça sınırını aşan bir cue her iki parçaya da
+  yazılıyor; birleşik dosyada aynı satır iki kez görünürdü.
+
+Biçim, adrese ya da `mimeType`e değil **inen byte'lara** bakılarak anlaşılıyor:
+sağlayıcılar `.vtt` uzantısının arkasına TTML koyabiliyor. fMP4'e sarılmış
+altyazılar (`wvtt`/`stpp`) mp4 kutusu açmayı gerektirdiği için baştan eleniyor
+— ve `describe` çıktısından da çıkarılıyor, çünkü listede görünüp inmemeleri
+kullanıcıya yalan söylemek olurdu.
+
+Varsayılan **açık** (`auto`). Kapalı bir özellik görünmeyen bir özellik ve
+bedel birkaç yüz KB. Altyazı hiçbir koşulda indirmeyi düşürmüyor; başarısız
+olursa uyarı, var olan uyarının *yanına* ekleniyor (üstüne yazsaydı ffmpeg'i
+olmayan herkeste sessizce yutulurdu).
+
+**Adımın yeri yazarken bir kez değişti.** Önce `finalize`dan sonraya
+konmuştu; uçtan uca test aralıklı olarak düştü ve sebebi test değil koddu:
+`finalize` durumu `Completed` yapıyor, yani "tamamlandı" diyen bir indirmenin
+altyazısı hâlâ iniyordu. Klasörü o anda açan kullanıcı dosyayı bulamaz,
+uygulamayı o anda kapatan hiç bulamazdı. Adım birleştirmeden sonraya ama
+`finalize`dan önceye alındı.
+
+### 3. Optimizasyon: ilerleme olayları biriktiriliyor (karar #30)
+
+`download::worker` her yazılan chunk için kanala bir olay gönderiyordu.
+reqwest'in chunk'ı tipik olarak 8–64 KB: 100 MB/s'de segment başına saniyede
+binlerce mesaj, sekiz segmentle on binlerce — hepsi yalnızca **hız göstergesi**
+için, çünkü ilerlemenin gerçek kaynağı `downloaded` atomiği.
+
+Artık 256 KB ya da 100 ms'de bir gönderiliyor. `Drop` uygulaması sayesinde
+fonksiyonun yedi `return`ünden hangisiyle çıkılırsa çıkılsın kalan byte
+kaybolmuyor. Aynı desen akış boru hattında da vardı; orada da düzeltildi.
+
+**Ölçülmedi ve "şu kadar hızlandı" iddiası yok.** Gerekçe aritmetik: saniyede
+on binlerce kanal mesajı karşılığında hiçbir bilgi kazandırmıyordu. Gerçek hız
+etkisi hâlâ sahada ölçülecek işler listesinde.
+
+### Sayılar
+
+Testler 297 → **332** (275 → 291 birim, 16 → 22 akış uçtan uca, 19 indirme
+uçtan uca). `cargo clippy --all-targets` ve `npm run build` temiz.
+
+### Not: 12. oturumun günlüğü eksikti
+
+`docs/worklog.md`'de 11. oturumdan sonra doğrudan bu girdi geliyordu; YouTube
+yakalama, ses çıkarma ve v0.1.4 yayını (üç commit) hiç yazılmamıştı. Aşağıya
+commit'lerden ve kararlardan geriye dönük bir girdi eklendi.
+
+### v0.1.5 yayınlandı
+
+Sürüm sekiz dosyada 0.1.5'e çekildi (altı uygulama dosyası + uzantı + tanıtım
+sayfası rozeti). Uzantının numarası, 11. oturumdaki kararla uygulamayla aynı
+diziyi izliyor.
+
+### Sıradaki
+
+Değişmedi ve hâlâ kod işi değil: gerçek dünya doğrulaması (IDM ile hız
+karşılaştırması, Chrome'da uzantı) ve video akışının gerçek bir siteye karşı
+denenmesi. Altyazı da bu listeye katıldı — yerel sunucuya karşı testli, gerçek
+bir sağlayıcıya karşı denenmedi.
+
+---
+
+## 2026-08-31 (12. oturum) — YouTube Yakalama, Ses Çıkarma, v0.1.4
+
+> Bu girdi geriye dönük yazıldı (13. oturum): o oturumda worklog'a hiç
+> dokunulmamış, oysa iki karar (#27, #28) ve bir yayın çıkmıştı.
+
+İlker, uzantının YouTube'da hiçbir şey bulamadığını bildirdi. Hata değildi:
+karar #26'nın süzgeci `.m3u8`/`.mpd` arıyor, YouTube ise normal videolarda
+manifest kullanmıyor — oynatıcı `googlevideo.com/videoplayback` adreslerini
+byte aralıklarıyla çekiyor.
+
+- **Doğrudan medya yakalama (karar #27).** Manifest süzgecinin yanına doğrudan
+  medya kuralları eklendi, tek bir sabitin arkasında:
+  `DOGRUDAN_MEDYA_YAKALAMA`. GitHub paketinde açık, Chrome Web Store
+  derlemesinde kapalı — mağaza politikası YouTube indirmeyi yasaklıyor ve
+  "uzantı yalnızca adresi bulur" ayrımı kurtarmıyor. İmza çözülmüyor;
+  tarayıcının zaten istediği adres görülüyor. Sessiz video akışları popup'ta
+  işaretleniyor.
+- **Ses indirme (karar #28).** `mux.rs`'e iki kip: varsayılan `AudioCopy`
+  (`-vn -c:a copy`, kayıpsız, `.m4a`/`.opus`) ve isteğe bağlı `AudioMp3`.
+  Çıktı uzantısı `codecs` alanından türetiliyor — kabı yanlış seçmek `-c copy`yi
+  çalışmaz hale getiriyor.
+- **v0.1.4 yayınlandı**, tanıtım sayfası baştan yazıldı; ardından üst çubuğun
+  ara genişliklerde kırılması düzeltildi.
+
+---
+
 ## 2026-08-31 (11. oturum) — Faz 6'yı Yayına Çıkarma, v0.1.3
 
 Bu oturum kod değil **dağıtım** işiydi. İlker sordu: GitHub'daki release,

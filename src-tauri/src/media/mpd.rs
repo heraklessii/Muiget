@@ -49,6 +49,7 @@ pub fn parse(text: &str, url: &str) -> Result<MediaManifest> {
 
     let mut video: Vec<MediaTrack> = Vec::new();
     let mut audio: Vec<MediaTrack> = Vec::new();
+    let mut subtitles: Vec<MediaTrack> = Vec::new();
 
     for (p_idx, period) in kok.children_named("Period").enumerate() {
         let period_base = base_url(period, &mpd_base);
@@ -62,9 +63,13 @@ pub fn parse(text: &str, url: &str) -> Result<MediaManifest> {
             let aset_base = base_url(aset, &period_base);
             let tur = icerik_turu(aset);
             if tur.is_none() {
-                continue; // Altyazı ve bilinmeyen türler kapsam dışı.
+                continue; // Bilinmeyen tür.
             }
             let dil = aset.attr("lang").map(str::to_string);
+            // DASH'te varsayılanı `<Role value="main"/>` söylüyor.
+            let varsayilan = aset
+                .children_named("Role")
+                .any(|r| r.attr("value").is_some_and(|v| v.eq_ignore_ascii_case("main")));
 
             for rep in aset.children_named("Representation") {
                 let rep_base = base_url(rep, &aset_base);
@@ -91,6 +96,7 @@ pub fn parse(text: &str, url: &str) -> Result<MediaManifest> {
                     name: None,
                     // DASH'te tek bir ses grubu kavramı yok; seçim dile göre.
                     group: None,
+                    default_track: varsayilan,
                     container: kap(rep, aset),
                     playlist_url: None,
                     init,
@@ -100,6 +106,7 @@ pub fn parse(text: &str, url: &str) -> Result<MediaManifest> {
 
                 match kind {
                     TrackKind::Audio => audio.push(parca),
+                    TrackKind::Subtitle => subtitles.push(parca),
                     _ => video.push(parca),
                 }
             }
@@ -133,6 +140,7 @@ pub fn parse(text: &str, url: &str) -> Result<MediaManifest> {
             .then(b.bandwidth.cmp(&a.bandwidth))
     });
     audio.sort_by_key(|a| std::cmp::Reverse(a.bandwidth));
+    subtitles.sort_by_key(|t| !t.default_track);
 
     Ok(MediaManifest {
         protocol: Protocol::Dash,
@@ -141,6 +149,7 @@ pub fn parse(text: &str, url: &str) -> Result<MediaManifest> {
         duration: toplam_sure,
         video,
         audio,
+        subtitles,
     })
 }
 
@@ -158,22 +167,37 @@ fn icerik_turu(aset: &Node) -> Option<TrackKind> {
         .or_else(|| aset.attr("mimeType"))
         .unwrap_or("")
         .to_ascii_lowercase();
+    if let Some(k) = turden(&ipucu) {
+        return Some(k);
+    }
+    // mimeType yalnızca Representation'da yazılmış olabilir.
+    let rep = aset.children_named("Representation").next()?;
+    let ipucu = rep.attr("mimeType").unwrap_or("").to_ascii_lowercase();
+    turden(&ipucu)
+}
+
+/// `contentType`/`mimeType` dizgesinden parça türü.
+///
+/// Altyazı iki farklı şekilde bildiriliyor: düz metin (`text/vtt`,
+/// `application/ttml+xml`) ya da fMP4'e sarılmış (`application/mp4` +
+/// `codecs="wvtt"`/`"stpp"`). Burada ikisi de altyazı sayılıyor; sarılmış
+/// olanı **indirme anında** eleniyor (bkz. [`super::subtitle_format`]), çünkü
+/// mp4 kutularını açmak ayrı bir iş ve o olmadan dosya oynatıcıya yaramaz.
+fn turden(ipucu: &str) -> Option<TrackKind> {
     if ipucu.starts_with("video") {
         return Some(TrackKind::Video);
     }
     if ipucu.starts_with("audio") {
         return Some(TrackKind::Audio);
     }
-    // mimeType yalnızca Representation'da yazılmış olabilir.
-    let rep = aset.children_named("Representation").next()?;
-    let ipucu = rep.attr("mimeType").unwrap_or("").to_ascii_lowercase();
-    if ipucu.starts_with("video") {
-        Some(TrackKind::Video)
-    } else if ipucu.starts_with("audio") {
-        Some(TrackKind::Audio)
-    } else {
-        None
+    if ipucu.starts_with("text")
+        || ipucu.contains("ttml")
+        || ipucu.contains("vtt")
+        || ipucu.contains("subtitle")
+    {
+        return Some(TrackKind::Subtitle);
     }
+    None
 }
 
 fn kap(rep: &Node, aset: &Node) -> Container {
@@ -475,6 +499,55 @@ mod tests {
     </AdaptationSet>
   </Period>
 </MPD>"#;
+
+    const ALTYAZILI: &str = r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT20S">
+  <BaseURL>https://cdn.example.com/vod/</BaseURL>
+  <Period>
+    <AdaptationSet mimeType="video/mp4" contentType="video">
+      <SegmentTemplate media="v-$Number$.m4s" startNumber="1" duration="4" timescale="1"/>
+      <Representation id="v0" bandwidth="800000" width="640" height="360"/>
+    </AdaptationSet>
+    <AdaptationSet contentType="text" mimeType="text/vtt" lang="en">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="main"/>
+      <Representation id="s_en" bandwidth="1000">
+        <BaseURL>subs/en.vtt</BaseURL>
+        <SegmentBase/>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet contentType="text" mimeType="application/mp4" codecs="wvtt" lang="tr">
+      <SegmentTemplate media="s-tr-$Number$.m4s" startNumber="1" duration="4" timescale="1"/>
+      <Representation id="s_tr" bandwidth="1000"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+
+    #[test]
+    fn altyazi_adaptation_set_ayri_listede() {
+        let m = parse(ALTYAZILI, "https://x/y/manifest.mpd").unwrap();
+        assert_eq!(m.video.len(), 1);
+        assert!(m.audio.is_empty());
+        assert_eq!(m.subtitles.len(), 2);
+
+        // `Role value="main"` olan başa alınıyor.
+        assert_eq!(m.subtitles[0].language.as_deref(), Some("en"));
+        assert!(m.subtitles[0].default_track);
+        assert_eq!(m.subtitles[0].kind, TrackKind::Subtitle);
+        assert_eq!(m.subtitles[0].segments[0].url, "https://cdn.example.com/vod/subs/en.vtt");
+
+        // Ayrı ses yok: video birleşik sayılıyor, ffmpeg şartı doğmuyor.
+        assert_eq!(m.video[0].kind, TrackKind::Muxed);
+    }
+
+    #[test]
+    fn fmp4e_sarili_altyazi_indirilebilir_sayilmiyor() {
+        let m = parse(ALTYAZILI, "https://x/y/manifest.mpd").unwrap();
+        let wvtt = m.subtitles.iter().find(|t| t.language.as_deref() == Some("tr")).unwrap();
+        // Ayrıştırma listeliyor ama indirme elemesi burada:
+        // `codecs="wvtt"` mp4 kutularının açılmasını gerektiriyor.
+        assert!(!super::super::subtitle_downloadable(wvtt));
+        assert!(super::super::subtitle_downloadable(&m.subtitles[0]));
+    }
 
     #[test]
     fn sablonlu_manifest_okunuyor() {

@@ -112,6 +112,7 @@ muiget/
 │       │   ├── xml.rs             # Küçük XML okuyucu (yalnızca DASH için)
 │       │   ├── m3u8.rs            # HLS master + medya playlist
 │       │   ├── mpd.rs             # DASH manifesti
+│       │   ├── vtt.rs             # WebVTT parçalarını birleştirme (karar #29)
 │       │   ├── crypt.rs           # AES-128 parça çözme, DRM reddi
 │       │   ├── pipeline.rs        # Paralel indir, sırayla yaz
 │       │   └── mux.rs             # ffmpeg bulma ve çağırma
@@ -135,7 +136,7 @@ npm run dev       # sadece frontend (Vite, localhost:1420)
 npm run build     # tsc + vite build → dist/
 npm run tauri dev # tam uygulama (Rust + pencere)
 cargo check       # src-tauri/ içinde, hızlı Rust doğrulaması
-cargo test        # 257 birim + 35 uçtan uca test
+cargo test        # 291 birim + 41 uçtan uca test
 ```
 
 Uçtan uca testler elle yazılmış küçük HTTP sunucuları kaldırıp motoru onlara
@@ -211,6 +212,14 @@ Detaylar için `docs/decisions.md`. Kısa özet:
 17. **Ses indirme**: varsayılan `-vn -c:a copy` ile kayıpsız çıkarma
     (`.m4a`/`.opus`); MP3 isteğe bağlı ve yeniden kodluyor. Çıktı uzantısı
     `codecs` alanından türetiliyor (karar #28).
+18. **Altyazı**: HLS `SUBTITLES` ve DASH `text` parçaları videonun yanına
+    `film.tr.vtt` olarak iniyor. Parçalar uç uca eklenmiyor — her biri tam bir
+    WebVTT belgesi olduğu için `media/vtt.rs` cue düzeyinde birleştirip
+    `X-TIMESTAMP-MAP`e göre hizalıyor. Varsayılan açık; altyazı hiçbir koşulda
+    indirmeyi düşürmüyor (karar #29).
+19. **İlerleme olayları biriktiriliyor**: chunk başına değil, 256 KB ya da
+    100 ms'de bir. Tek tüketici hız ölçer; ilerlemenin kaynağı `downloaded`
+    atomiği (karar #30).
 
 ## Çalışma Tarzı Notları
 
@@ -226,17 +235,18 @@ Detaylar için `docs/decisions.md`. Kısa özet:
 
 **Faz 0, 1, 2, 3, 5 ve Faz 6'nın çekirdeği tamamlandı.** Çalışan bir segmentli
 indirme motoru, **HLS/DASH video indirme**, tam bir arayüz ve Chrome uzantısı
-var. 292 test geçiyor. Uygulama gerçek penceresinde uçtan uca doğrulandı (8 MB
+var. 332 test geçiyor. Uygulama gerçek penceresinde uçtan uca doğrulandı (8 MB
 dosya, 8 paralel segment, SHA-256 birebir aynı) ve 10. oturumda akış indirmesi
 de aynı yöntemle doğrulandı (yerel VOD playlisti, parçalar paralel indi, SHA-256
 birebir). Chrome köprüsü de Chrome'un gerçek çağrısıyla doğrulandı; son yayın
-v0.1.3.
+v0.1.4.
 
 IDM'e yaklaştıran eklemeler: host kotasının indirmeler arasında adil
 bölüşülmesi (karar #17), kategori klasörleri (#18), vekil sunucu (#19),
 adrese gömülü kimlik bilgisi (#20), checksum (#21), kopya uyarısı (#22),
 sürüm bildirimi (#23), pano izleme (#24), **akış videosu (#25)**, **uzantıda
-video yakalama (#26)**, satır sağ tık menüsü, sürükle-bırakla bağlantı ekleme
+video yakalama (#26)**, YouTube yakalama (#27), ses çıkarma (#28),
+**altyazı (#29)**, satır sağ tık menüsü, sürükle-bırakla bağlantı ekleme
 ve toplu ekleme.
 
 Yayın artık üç platform: Windows + Linux (`.deb`/`.AppImage`) + macOS
@@ -261,7 +271,9 @@ Sıradaki öncelikler (`docs/tasks.md` → "Sıradaki"):
    hızlı" cümlesi tahmin.
 2. **Video akışının sahada denenmesi** — kod ve testler hazır ama gerçek bir
    video sitesine karşı hiç denenmedi; ffmpeg'li birleştirme de gerçek
-   ffmpeg'le çalıştırılmadı (bu makinede ffmpeg yok).
+   ffmpeg'le çalıştırılmadı (bu makinede ffmpeg yok). **Altyazı da bu listede:**
+   13. oturumda eklendi, yerel sunucuya karşı altı uçtan uca testi var, gerçek
+   bir sağlayıcıya karşı hiç çalıştırılmadı.
 3. **Tarayıcı kapsamı** — Firefox/Edge uyarlaması + Chrome Web Store yayını.
    Rekabetin kazanıldığı yer hız değil yakalama; video yakalama geldiğine göre
    uzantının değeri de arttı.

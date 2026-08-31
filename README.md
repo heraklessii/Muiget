@@ -8,7 +8,7 @@ anahtarı satın alması gerekmeyen, kodunu herkesin okuyup değiştirebildiği 
 [![Status](https://img.shields.io/badge/durum-geli%C5%9Ftirme%20a%C5%9Famas%C4%B1nda-orange.svg)](docs/tasks.md)
 
 > ⚠️ **Bu proje erken geliştirme aşamasında.** İndirme motoru, video akışı
-> indirme, arayüz ve Chrome uzantısı çalışıyor (292 test geçiyor) ama uygulama
+> indirme, arayüz ve Chrome uzantısı çalışıyor (332 test geçiyor) ama uygulama
 > geniş çapta sahada denenmedi ve torrent desteği henüz eklenmedi. İlerlemeyi
 > [`docs/tasks.md`](docs/tasks.md) üzerinden takip edebilirsiniz.
 
@@ -48,6 +48,11 @@ anahtarı satın alması gerekmeyen, kodunu herkesin okuyup değiştirebildiği 
   dönüşümü ve ayrı inen sesin görüntüyle birleştirilmesi için gerekiyor;
   kurulu değilse video yine iniyor, gerekli olduğu durumda da indirme
   başlamadan söyleniyor.
+- **Altyazı** — Yayında altyazı varsa videonun yanına `film.tr.vtt` olarak
+  iner. Parçalar uç uca eklenmez, cue düzeyinde birleştirilir ve zaman ekseni
+  hizalanır — aksi hâlde çoğu oynatıcı dosyayı hiç açmaz. Dil tercihine uyan
+  altyazı seçilir; Ayarlar'dan "hepsi" ya da "indirme" yapılabilir. Altyazının
+  inmemesi videoyu hiçbir zaman düşürmez.
 - **Tarayıcı entegrasyonu** — Chrome uzantısı ile sağ tık → "Muiget ile indir",
   sayfa taraması, **video yakalama** (sayfadaki HLS/DASH yayınlarını bulur;
   isteğe bağlı izin, varsayılan kapalı) ve isteğe bağlı indirme devralma
@@ -168,7 +173,7 @@ Bu seçimlerin gerekçeleri için: [`docs/decisions.md`](docs/decisions.md).
 | 3 | Tauri UI (React) | ✅ Tamamlandı |
 | 4 | Torrent entegrasyonu | ⚪ Ertelendi |
 | 5 | Chrome uzantısı | ✅ Tamamlandı |
-| 6 | HLS/DASH video, checksum, opsiyonel virüs taraması | 🟡 Video ve checksum bitti |
+| 6 | HLS/DASH video, altyazı, checksum, opsiyonel virüs taraması | 🟡 Video, altyazı ve checksum bitti |
 | 7 | Plugin sistemi, istatistikler, katkı rehberi | ⚪ Bekliyor |
 
 **Bilinen eksikler:** torrent desteği henüz yok; video sitelerinden HLS/DASH

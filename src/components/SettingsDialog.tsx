@@ -502,11 +502,13 @@ export function SettingsDialog({ settings, onClose, onSave, onSaveQuiet, onResca
 
           <label className="field row">
             <span>
-              Ses dili
+              Ses ve altyazı dili
               <br />
               <span className="field-hint">
-                Birden çok ses parçası olan yayınlarda tercih edilecek dil
-                (<code>tr</code>, <code>en</code>…). Boşsa manifestin varsayılanı.
+                Birden çok ses ya da altyazı parçası olan yayınlarda tercih edilecek
+                dil (<code>tr</code>, <code>en</code>…). Boşsa yayının kendi
+                varsayılanı. <code>tr</code> yazmak <code>tr-TR</code> ile de
+                eşleşiyor.
               </span>
             </span>
             <input
@@ -518,6 +520,29 @@ export function SettingsDialog({ settings, onClose, onSave, onSaveQuiet, onResca
               spellCheck={false}
               autoComplete="off"
             />
+          </label>
+
+          <label className="field row">
+            <span>
+              Altyazı
+              <br />
+              <span className="field-hint">
+                Manifestte altyazı varsa videonun yanına <code>.vtt</code> olarak
+                yazılıyor (<code>film.tr.vtt</code>). "Dil tercihine uyan" seçeneği
+                yukarıdaki dili kullanıyor; o dil yoksa yayının varsayılanı iniyor.
+                Altyazı indirmesi hiçbir zaman videoyu düşürmüyor.
+              </span>
+            </span>
+            <select
+              className="select"
+              style={{ width: 160 }}
+              value={taslak.engine.mediaSubtitles}
+              onChange={(e) => motoruGuncelle({ mediaSubtitles: e.target.value })}
+            >
+              <option value="auto">Dil tercihine uyan</option>
+              <option value="all">Hepsi</option>
+              <option value="off">İndirme</option>
+            </select>
           </label>
 
           <label className="field row">

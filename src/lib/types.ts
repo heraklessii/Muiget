@@ -75,6 +75,11 @@ export interface MediaInfo {
   durationSeconds: number | null;
   video: TrackInfo[];
   audio: TrackInfo[];
+  /**
+   * İndirilebilir altyazılar. fMP4'e sarılmış (`wvtt`/`stpp`) olanlar burada
+   * görünmüyor: listede olup inmemeleri kullanıcıya yalan söylemek olurdu.
+   */
+  subtitles: TrackInfo[];
   /** Ayarlardaki tercihle seçilecek parçalar — diyalog bunları işaretliyor. */
   defaultVideo: string | null;
   defaultAudio: string | null;
@@ -166,6 +171,8 @@ export interface ManagerConfig {
   mediaLanguage: string;
   /** Aynı anda kaç video parçası insin. */
   mediaConcurrency: number;
+  /** `auto` | `all` | `off` — bkz. `docs/decisions.md` #29. */
+  mediaSubtitles: string;
 }
 
 export interface AppSettings {

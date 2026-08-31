@@ -61,6 +61,19 @@ impl Default for FetchConfig {
     }
 }
 
+/// Olayın hangi parçadan geldiği.
+///
+/// Olaylar sınırsız bir kanaldan akıyor: gönderen bir sonraki aşamaya geçtiğinde
+/// önceki aşamanın son olayları hâlâ kanalda bekliyor olabiliyor. Aşamayı
+/// dışarıdan bir bayrakla takip etmek bu yüzden yanlıştı — videonun son
+/// parçaları ses sayacına yazılabiliyordu. Rolü artık olayın kendisi taşıyor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackRole {
+    Video,
+    Audio,
+    Subtitle,
+}
+
 /// Boru hattının dışarı bildirdiği olaylar.
 #[derive(Debug, Clone)]
 pub enum FetchEvent {
@@ -69,8 +82,8 @@ pub enum FetchEvent {
     /// bu değil.
     Bytes(u64),
     /// Bir parça indi, çözüldü ve diske yazıldı. İlerlemenin tek doğru kaynağı.
-    SegmentWritten { index: usize, bytes: u64, written: u64 },
-    Retrying { index: usize, attempt: u32, error: String },
+    SegmentWritten { role: TrackRole, index: usize, bytes: u64, written: u64 },
+    Retrying { role: TrackRole, index: usize, attempt: u32, error: String },
 }
 
 /// Bir indirmenin tüm parçalarında ortak olan bağlam.
@@ -101,6 +114,7 @@ pub struct TrackStats {
 pub async fn download_track(
     ctx: &FetchContext,
     track: &MediaTrack,
+    role: TrackRole,
     output: &Path,
     start_index: usize,
     resume_bytes: u64,
@@ -126,7 +140,7 @@ pub async fn download_track(
     // dosyada kodek bilgisi yok ve hiçbir oynatıcı açamıyor.
     if start_index == 0 {
         if let Some(init) = &track.init {
-            let veri = parcayi_al(ctx, init, 0, events).await?;
+            let veri = parcayi_al(ctx, init, role, 0, events).await?;
             dosya.write_all(&veri).await?;
             yazilan += veri.len() as u64;
         }
@@ -141,7 +155,7 @@ pub async fn download_track(
         .map(|ofset| {
             let index = start_index + ofset;
             async move {
-                parcayi_al(ctx, &kalan[ofset], index, events)
+                parcayi_al(ctx, &kalan[ofset], role, index, events)
                     .await
                     .map(|veri| (index, veri))
             }
@@ -164,6 +178,7 @@ pub async fn download_track(
                 yazilan += veri.len() as u64;
                 sayac += 1;
                 let _ = events.send(FetchEvent::SegmentWritten {
+                    role,
                     index,
                     bytes: veri.len() as u64,
                     written: yazilan,
@@ -183,10 +198,52 @@ pub async fn download_track(
     Ok(TrackStats { bytes: yazilan, segments: sayac })
 }
 
+/// Altyazı parçalarını indirip **bellekte** döner.
+///
+/// Videodan farklı akmasının sebebi birleştirmenin metin düzeyinde olması:
+/// parçalar art arda yazılamıyor, ayrıştırılıp tek bir WebVTT belgesine
+/// dönüştürülüyor (bkz. [`super::vtt`]). Bellek riski yok — bir saatlik filmin
+/// altyazısı birkaç yüz KB.
+pub async fn fetch_subtitle_parts(
+    ctx: &FetchContext,
+    track: &MediaTrack,
+    events: &mpsc::UnboundedSender<FetchEvent>,
+) -> Result<Vec<Vec<u8>>> {
+    let toplam = track.segments.len();
+    let mut akis = stream::iter(0..toplam)
+        .map(|index| async move {
+            parcayi_al(ctx, &track.segments[index], TrackRole::Subtitle, index, events)
+                .await
+                .map(|veri| (index, veri))
+        })
+        .buffered(ctx.config.concurrency.max(1));
+
+    let mut parcalar: Vec<Vec<u8>> = Vec::with_capacity(toplam);
+    loop {
+        let sonraki = tokio::select! {
+            biased;
+            _ = ctx.cancel.cancelled() => return Err(DownloadError::Cancelled),
+            n = akis.next() => n,
+        };
+        let Some(sonuc) = sonraki else { break };
+        let (index, veri) = sonuc?;
+        let boyut = veri.len() as u64;
+        parcalar.push(veri);
+        let _ = events.send(FetchEvent::SegmentWritten {
+            role: TrackRole::Subtitle,
+            index,
+            bytes: boyut,
+            written: 0,
+        });
+    }
+    Ok(parcalar)
+}
+
 /// Tek bir parçayı indirir; hata alırsa üstel geri çekilmeyle yeniden dener.
 async fn parcayi_al(
     ctx: &FetchContext,
     segment: &MediaSegment,
+    role: TrackRole,
     index: usize,
     events: &mpsc::UnboundedSender<FetchEvent>,
 ) -> Result<Vec<u8>> {
@@ -209,6 +266,7 @@ async fn parcayi_al(
                     )));
                 }
                 let _ = events.send(FetchEvent::Retrying {
+                    role,
                     index,
                     attempt: deneme,
                     error: e.to_string(),
@@ -254,6 +312,13 @@ async fn tek_deneme(
     let mut govde: Vec<u8> = Vec::with_capacity(yanit.content_length().unwrap_or(0) as usize);
     let mut akis = yanit.bytes_stream();
 
+    // Hız olayları biriktiriliyor, chunk başına gönderilmiyor: eşikler ve
+    // gerekçesi `download::worker`da (aynı sorun, aynı sayılar). Burada ayrı
+    // bir tip yerine iki yerel değişken var, çünkü tek çıkış noktası bu
+    // fonksiyonun sonu — worker'daki yedi `return` gibi bir dağınıklık yok.
+    let mut birikmis = 0u64;
+    let mut son_gonderim = std::time::Instant::now();
+
     loop {
         let sonraki = tokio::select! {
             biased;
@@ -267,7 +332,14 @@ async fn tek_deneme(
                     continue;
                 }
                 ctx.rate.consume(chunk.len() as u64).await;
-                let _ = events.send(FetchEvent::Bytes(chunk.len() as u64));
+                birikmis += chunk.len() as u64;
+                if birikmis >= crate::download::worker::ILERLEME_ESIGI_BYTE
+                    || son_gonderim.elapsed() >= crate::download::worker::ILERLEME_ESIGI_SURE
+                {
+                    let _ = events.send(FetchEvent::Bytes(birikmis));
+                    birikmis = 0;
+                    son_gonderim = std::time::Instant::now();
+                }
                 govde.extend_from_slice(&chunk);
             }
             Ok(Some(Err(e))) => return Err(DownloadError::Network(e)),
@@ -279,6 +351,13 @@ async fn tek_deneme(
                 )))
             }
         }
+    }
+
+    // Kalan birikmiş byte'lar: hız göstergesinin parçanın son kırıntısını da
+    // görmesi için. Hata yollarında gönderilmiyor — o byte'lar zaten
+    // yeniden denemede baştan sayılacak.
+    if birikmis > 0 {
+        let _ = events.send(FetchEvent::Bytes(birikmis));
     }
 
     if let Some(anahtar_bilgisi) = &segment.key {

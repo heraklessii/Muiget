@@ -16,7 +16,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use reqwest::header::RANGE;
@@ -170,6 +170,72 @@ pub async fn run_segment(
     }
 }
 
+/// Kaç byte biriktikten sonra ilerleme olayı gönderilsin.
+///
+/// Eskiden her chunk bir olay gönderiyordu. reqwest'in verdiği chunk tipik
+/// olarak 8–64 KB: 100 MB/s'lik bir bağlantıda segment başına saniyede binlerce
+/// mesaj, sekiz segmentle on binlerce. Her mesaj sınırsız kanala girip
+/// süpervizör görevini uyandırıyordu — hepsi yalnızca **hız göstergesi** için,
+/// çünkü ilerlemenin gerçek kaynağı `SegmentContext.downloaded` atomiği.
+///
+/// 256 KB ve 100 ms: hangisi önce dolarsa. Bayt eşiği hızlı bağlantıda mesaj
+/// sayısını sabitliyor, süre eşiği yavaş bağlantıda göstergenin donmasını
+/// önlüyor — 20 KB/s'de yalnızca bayt eşiğine bakan bir kod on saniyede bir
+/// güncelleme yapardı.
+pub(crate) const ILERLEME_ESIGI_BYTE: u64 = 256 * 1024;
+pub(crate) const ILERLEME_ESIGI_SURE: Duration = Duration::from_millis(100);
+
+/// İlerleme olaylarını biriktirip seyrek gönderir.
+///
+/// Hız ölçümü için toplam byte ve zaman önemli, tek tek chunk'lar değil:
+/// EWMA'nın yarı-ömrü 3 saniye, yani 100 ms'lik toplama penceresi ölçümü
+/// gözle görülür biçimde değiştirmiyor.
+struct IlerlemeBiriktirici<'a> {
+    events: &'a mpsc::UnboundedSender<WorkerEvent>,
+    index: usize,
+    birikmis: u64,
+    son_gonderim: Instant,
+}
+
+impl<'a> IlerlemeBiriktirici<'a> {
+    fn yeni(events: &'a mpsc::UnboundedSender<WorkerEvent>, index: usize) -> Self {
+        IlerlemeBiriktirici { events, index, birikmis: 0, son_gonderim: Instant::now() }
+    }
+
+    fn ekle(&mut self, bytes: u64) {
+        self.birikmis += bytes;
+        if self.birikmis >= ILERLEME_ESIGI_BYTE
+            || self.son_gonderim.elapsed() >= ILERLEME_ESIGI_SURE
+        {
+            self.bosalt();
+        }
+    }
+
+    /// Birikeni gönderir. Segment biterken ya da hata dönerken çağrılıyor:
+    /// aksi hâlde son birkaç yüz KB hız ölçümüne hiç girmezdi.
+    fn bosalt(&mut self) {
+        if self.birikmis == 0 {
+            return;
+        }
+        let _ = self.events.send(WorkerEvent::Progress {
+            index: self.index,
+            bytes: self.birikmis,
+        });
+        self.birikmis = 0;
+        self.son_gonderim = Instant::now();
+    }
+}
+
+impl Drop for IlerlemeBiriktirici<'_> {
+    /// Fonksiyondan hangi yoldan çıkılırsa çıkılsın birikeni gönder.
+    ///
+    /// `indir` yedi ayrı noktadan `return` ediyor; her birine elle bir çağrı
+    /// koymak, ileride eklenecek sekizincinin unutulması demekti.
+    fn drop(&mut self) {
+        self.bosalt();
+    }
+}
+
 /// Tek denemenin gövdesi.
 #[allow(clippy::too_many_arguments)]
 async fn indir(
@@ -222,6 +288,7 @@ async fn indir(
 
     let mut writer = SegmentWriter::open(part_path, cursor).await?;
     let mut stream = response.bytes_stream();
+    let mut ilerleme = IlerlemeBiriktirici::yeni(events, ctx.index);
 
     loop {
         if cancel.is_cancelled() {
@@ -294,7 +361,7 @@ async fn indir(
         }
         writer.flush_if_needed(config.flush_threshold).await?;
 
-        let _ = events.send(WorkerEvent::Progress { index: ctx.index, bytes: ayrilan });
+        ilerleme.ekle(ayrilan);
 
         // Hız sınırı chunk yazıldıktan SONRA uygulanıyor; bekleme soketten
         // okumayı yavaşlatıyor ve TCP akış kontrolü karşı tarafa yansıtıyor.
@@ -336,6 +403,57 @@ mod tests {
 
     fn cfg() -> WorkerConfig {
         WorkerConfig::default()
+    }
+
+    /// Biriktiriciden çıkan olayların byte'larını toplar.
+    fn olaylari_topla(rx: &mut mpsc::UnboundedReceiver<WorkerEvent>) -> (usize, u64) {
+        let mut adet = 0;
+        let mut toplam = 0;
+        while let Ok(WorkerEvent::Progress { bytes, .. }) = rx.try_recv() {
+            adet += 1;
+            toplam += bytes;
+        }
+        (adet, toplam)
+    }
+
+    #[test]
+    fn ilerleme_biriktiricisi_esik_altinda_olay_gondermiyor() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut b = IlerlemeBiriktirici::yeni(&tx, 0);
+
+        // 16 KB'lık on chunk = 160 KB; eşik 256 KB. Süre eşiğine takılmasınlar
+        // diye zamanı ileri sarmıyoruz — test milisaniyeler içinde bitiyor.
+        for _ in 0..10 {
+            b.ekle(16 * 1024);
+        }
+        assert_eq!(olaylari_topla(&mut rx).0, 0, "eşik altında olay çıkmamalı");
+
+        // Eşiği aşınca tek bir olayda toplu gidiyor.
+        b.ekle(128 * 1024);
+        let (adet, toplam) = olaylari_topla(&mut rx);
+        assert_eq!(adet, 1, "on bir chunk için tek olay bekleniyordu");
+        assert_eq!(toplam, 288 * 1024);
+    }
+
+    #[test]
+    fn biriktirici_dusunce_kalan_byte_kaybolmuyor() {
+        // Asıl risk bu: segment eşiğe ulaşmadan biterse (ya da hata dönerse)
+        // son kırıntı hız ölçümüne hiç girmezdi.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        {
+            let mut b = IlerlemeBiriktirici::yeni(&tx, 3);
+            b.ekle(1024);
+        }
+        let (adet, toplam) = olaylari_topla(&mut rx);
+        assert_eq!(adet, 1);
+        assert_eq!(toplam, 1024);
+    }
+
+    #[test]
+    fn bos_biriktirici_olay_uretmiyor() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        drop(IlerlemeBiriktirici::yeni(&tx, 0));
+        assert_eq!(olaylari_topla(&mut rx).0, 0);
     }
 
     #[test]

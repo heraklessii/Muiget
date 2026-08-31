@@ -142,6 +142,7 @@ impl AppSettings {
         self.engine.ffmpeg_path = self.engine.ffmpeg_path.trim().to_string();
         self.engine.media_language = self.engine.media_language.trim().to_ascii_lowercase();
         self.engine.media_quality = self.engine.media_quality.trim().to_ascii_lowercase();
+        self.engine.media_subtitles = self.engine.media_subtitles.trim().to_ascii_lowercase();
         // Üst sınır 16: bir CDN'e daha fazla eşzamanlı parça isteği atmak
         // indirmeyi hızlandırmıyor, 429 riskini artırıyor.
         self.engine.media_concurrency = self.engine.media_concurrency.clamp(1, 16);
@@ -381,6 +382,9 @@ mod tests {
         assert_eq!(a.engine.media_concurrency, 6);
         assert_eq!(a.engine.ffmpeg_path, "", "eksik alanda ffmpeg otomatik aranmalı");
         assert_eq!(a.engine.media_language, "");
+        // Altyazı (karar #29) daha da sonra eklendi. Eksik alanın `Off`
+        // okunması, özelliği hiç görmeyen bir kullanıcı kitlesi demek olurdu.
+        assert_eq!(a.engine.media_subtitles, "auto");
     }
 
     #[tokio::test]
@@ -390,6 +394,7 @@ mod tests {
         a.engine.ffmpeg_path = "  C:/araclar/ffmpeg.exe  ".into();
         a.engine.media_language = " TR ".into();
         a.engine.media_quality = " 720P ".into();
+        a.engine.media_subtitles = " ALL ".into();
         a.normalize();
 
         // 0 eşzamanlı parça indirmeyi sonsuza kadar bekletirdi.
@@ -397,6 +402,7 @@ mod tests {
         assert_eq!(a.engine.ffmpeg_path, "C:/araclar/ffmpeg.exe");
         assert_eq!(a.engine.media_language, "tr");
         assert_eq!(a.engine.media_quality, "720p");
+        assert_eq!(a.engine.media_subtitles, "all");
 
         a.engine.media_concurrency = 99;
         a.normalize();

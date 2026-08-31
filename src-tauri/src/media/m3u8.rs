@@ -59,6 +59,8 @@ pub fn parse(text: &str, url: &str) -> Result<MediaManifest> {
         duration: Some(parca.duration),
         video: vec![parca],
         audio: Vec::new(),
+        // Medya playlisti tek başına altyazı bilmiyor; onlar master playlistte.
+        subtitles: Vec::new(),
     })
 }
 
@@ -66,6 +68,7 @@ pub fn parse(text: &str, url: &str) -> Result<MediaManifest> {
 fn parse_master(text: &str, url: &str) -> Result<MediaManifest> {
     let mut video: Vec<MediaTrack> = Vec::new();
     let mut audio: Vec<MediaTrack> = Vec::new();
+    let mut subtitles: Vec<MediaTrack> = Vec::new();
     // Bir sonraki adres satırını bekleyen `#EXT-X-STREAM-INF` öznitelikleri.
     let mut bekleyen: Option<Vec<(String, String)>> = None;
     // URI'si olmayan ses grupları: ses videonun içinde demek.
@@ -80,14 +83,33 @@ fn parse_master(text: &str, url: &str) -> Result<MediaManifest> {
         if let Some(govde) = satir.strip_prefix("#EXT-X-MEDIA:") {
             let attrs = parse_attrs(govde);
             let tur = attr(&attrs, "TYPE").unwrap_or_default().to_ascii_uppercase();
-            if tur != "AUDIO" {
-                // Altyazı ve kamera açısı bu sürümde kapsam dışı.
+            // `CLOSED-CAPTIONS` (CEA-608/708) video akışının **içinde** taşınıyor;
+            // ayrı indirilebilecek bir adresi yok. `URI` alanı da bu yüzden boş
+            // geliyor ve aşağıdaki kontrole takılıyor.
+            if tur != "AUDIO" && tur != "SUBTITLES" {
                 continue;
             }
             let Some(uri) = attr(&attrs, "URI") else {
                 // URI yoksa ses zaten video parçasının içinde.
                 continue;
             };
+            if tur == "SUBTITLES" {
+                let adres = media_url::resolve(url, &uri);
+                subtitles.push(MediaTrack {
+                    id: adres.clone(),
+                    kind: TrackKind::Subtitle,
+                    language: attr(&attrs, "LANGUAGE"),
+                    name: attr(&attrs, "NAME"),
+                    group: attr(&attrs, "GROUP-ID"),
+                    // Manifest sırası sağlayıcının varsayılanını yansıtmıyor;
+                    // `DEFAULT=YES` yazan parça öne alınıyor (aşağıda).
+                    default_track: attr(&attrs, "DEFAULT")
+                        .is_some_and(|d| d.eq_ignore_ascii_case("YES")),
+                    playlist_url: Some(adres),
+                    ..MediaTrack::default()
+                });
+                continue;
+            }
             let grup = attr(&attrs, "GROUP-ID");
             if let Some(g) = &grup {
                 if !ayri_ses_gruplari.contains(g) {
@@ -101,6 +123,8 @@ fn parse_master(text: &str, url: &str) -> Result<MediaManifest> {
                 language: attr(&attrs, "LANGUAGE"),
                 name: attr(&attrs, "NAME"),
                 group: grup,
+                default_track: attr(&attrs, "DEFAULT")
+                    .is_some_and(|d| d.eq_ignore_ascii_case("YES")),
                 playlist_url: Some(adres),
                 ..MediaTrack::default()
             });
@@ -168,6 +192,11 @@ fn parse_master(text: &str, url: &str) -> Result<MediaManifest> {
         }
     }
 
+    // `DEFAULT=YES` olan altyazı başa: seçimin varsayılanı "listenin ilki" ve
+    // sağlayıcı hangisini istediğini bu öznitelikle söylüyor. Sıralama kararlı,
+    // yani aynı gruptaki geri kalanın manifest sırası bozulmuyor.
+    subtitles.sort_by_key(|t| !t.default_track);
+
     // En iyi kalite başa: seçimin varsayılanı "listenin ilki".
     video.sort_by(|a, b| {
         b.height
@@ -185,6 +214,7 @@ fn parse_master(text: &str, url: &str) -> Result<MediaManifest> {
         duration: None,
         video,
         audio,
+        subtitles,
     })
 }
 
@@ -461,10 +491,49 @@ https://baska.cdn/seg2.ts
         assert_eq!(m.video[0].kind, TrackKind::Video);
         assert_eq!(m.video[0].group.as_deref(), Some("aac"));
 
-        // Altyazı listeye girmiyor.
         assert_eq!(m.audio.len(), 2);
         assert_eq!(m.audio[0].language.as_deref(), Some("tr"));
         assert_eq!(m.audio[0].id, "https://cdn/x/audio/tr.m3u8");
+        assert!(m.audio[0].default_track, "DEFAULT=YES okunmalı");
+        assert!(!m.audio[1].default_track);
+    }
+
+    #[test]
+    fn altyazi_parcalari_ayri_listede() {
+        let m = parse(MASTER, "https://cdn/x/master.m3u8").unwrap();
+        assert_eq!(m.subtitles.len(), 1);
+        assert_eq!(m.subtitles[0].kind, TrackKind::Subtitle);
+        assert_eq!(m.subtitles[0].id, "https://cdn/x/sub/tr.m3u8");
+        assert_eq!(m.subtitles[0].name.as_deref(), Some("tr"));
+        // Altyazı ne video ne ses listesine sızmamalı.
+        assert!(!m.video.iter().any(|t| t.id.contains("/sub/")));
+        assert!(!m.audio.iter().any(|t| t.id.contains("/sub/")));
+    }
+
+    #[test]
+    fn varsayilan_altyazi_basa_aliniyor() {
+        let metin = "#EXTM3U\n\
+            #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"s\",NAME=\"English\",LANGUAGE=\"en\",URI=\"en.m3u8\"\n\
+            #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"s\",NAME=\"Türkçe\",LANGUAGE=\"tr\",DEFAULT=YES,URI=\"tr.m3u8\"\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=1000,RESOLUTION=640x360\n\
+            v.m3u8\n";
+        let m = parse(metin, "https://cdn/master.m3u8").unwrap();
+        assert_eq!(m.subtitles.len(), 2);
+        assert_eq!(m.subtitles[0].language.as_deref(), Some("tr"), "DEFAULT=YES başa");
+        assert_eq!(m.subtitles[1].language.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn urisiz_altyazi_atlaniyor() {
+        // `CLOSED-CAPTIONS` video akışının içinde taşınıyor; ayrı indirilecek
+        // bir adresi olmadığı için listede yeri yok.
+        let metin = "#EXTM3U\n\
+            #EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS,GROUP-ID=\"cc\",NAME=\"CC1\",INSTREAM-ID=\"CC1\"\n\
+            #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"s\",NAME=\"yok\"\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=1000,RESOLUTION=640x360\n\
+            v.m3u8\n";
+        let m = parse(metin, "https://cdn/master.m3u8").unwrap();
+        assert!(m.subtitles.is_empty());
     }
 
     #[test]

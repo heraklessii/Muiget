@@ -40,6 +40,7 @@ pub mod mpd;
 pub mod mux;
 pub mod pipeline;
 pub mod url;
+pub mod vtt;
 pub mod xml;
 
 use serde::{Deserialize, Serialize};
@@ -101,6 +102,9 @@ pub enum TrackKind {
     Muxed,
     Video,
     Audio,
+    /// Altyazı. Videonun yanına ayrı bir dosya olarak yazılıyor; ilerleme
+    /// sayacına girmiyor (birkaç yüz KB).
+    Subtitle,
 }
 
 /// Bir parçanın byte aralığı (`#EXT-X-BYTERANGE`, DASH `mediaRange`).
@@ -164,6 +168,10 @@ pub struct MediaTrack {
     /// anında yapılıyor. Bir master playlistte birden çok ses grubu olabiliyor
     /// (ör. stereo ve 5.1) ve yanlış gruptan ses almak sessiz dosya demek.
     pub group: Option<String>,
+    /// Sağlayıcı bu parçayı varsayılan işaretledi mi (HLS `DEFAULT=YES`,
+    /// DASH `Role@value="main"`). Yalnızca altyazı seçiminde kullanılıyor;
+    /// ses/videoda kalite ve dil zaten daha güçlü ölçütler.
+    pub default_track: bool,
     pub container: Container,
     /// HLS: bu parçanın medya playlist adresi. Parçalar ancak o indirilince
     /// biliniyor. DASH'te her şey tek belgede olduğu için `None`.
@@ -234,6 +242,9 @@ pub struct MediaManifest {
     pub video: Vec<MediaTrack>,
     /// Ayrı ses parçaları. Boşsa ses zaten video parçasının içinde.
     pub audio: Vec<MediaTrack>,
+    /// Altyazı parçaları. Videoyu hiçbir zaman engellemiyorlar: bir altyazı
+    /// inmezse indirme yine de tamamlanıyor (bkz. `docs/decisions.md` #29).
+    pub subtitles: Vec<MediaTrack>,
 }
 
 impl MediaManifest {
@@ -241,13 +252,177 @@ impl MediaManifest {
         self.video
             .iter()
             .chain(self.audio.iter())
+            .chain(self.subtitles.iter())
             .find(|t| t.id == id)
     }
 }
 
-/// Kullanıcının kalite tercihi.
+/// Altyazı tercihi.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SubtitleMode {
+    /// Hiç indirme.
+    Off,
+    /// Dil tercihine uyanı, yoksa sağlayıcının varsayılanını indir.
+    #[default]
+    Auto,
+    /// Manifestteki bütün altyazıları indir.
+    All,
+}
+
+impl SubtitleMode {
+    /// Ayarlardaki dizgeyi çözer. Tanınmayan değer `Auto`: bozuk bir ayar
+    /// yüzünden kullanıcının altyazısını sessizce kesmek, bir dosya fazla
+    /// yazmaktan kötü.
+    pub fn parse(s: &str) -> SubtitleMode {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "off" | "kapali" | "kapalı" | "none" => SubtitleMode::Off,
+            "all" | "hepsi" => SubtitleMode::All,
+            _ => SubtitleMode::Auto,
+        }
+    }
+}
+
+/// Altyazı parçasının indirilmiş hâlinin biçimi.
+///
+/// Adrese ya da `mimeType`e değil **inen byte'lara** bakılıyor: sağlayıcılar
+/// `.vtt` uzantısının arkasına TTML, `application/mp4` etiketinin arkasına düz
+/// WebVTT koyabiliyor ve yanlış biçimde yazılan bir altyazı dosyası hiçbir
+/// oynatıcıda açılmıyor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubtitleFormat {
+    WebVtt,
+    /// TTML / DFXP — XML tabanlı. Parçaları birleştirilemiyor, yalnızca tek
+    /// parçalı olanlar yazılıyor.
+    Ttml,
+    /// fMP4'e sarılmış (`wvtt`/`stpp`) ya da tanınmayan. Desteklenmiyor.
+    Unsupported,
+}
+
+/// İnen ilk byte'lardan biçimi anlar.
+pub fn sniff_subtitle(veri: &[u8]) -> SubtitleFormat {
+    let bas = veri
+        .strip_prefix(&[0xEF, 0xBB, 0xBF])
+        .unwrap_or(veri);
+    let bas = &bas[..bas.len().min(64)];
+    let metin = String::from_utf8_lossy(bas);
+    let kirpik = metin.trim_start();
+    if kirpik.starts_with("WEBVTT") {
+        return SubtitleFormat::WebVtt;
+    }
+    if kirpik.starts_with('<') {
+        return SubtitleFormat::Ttml;
+    }
+    SubtitleFormat::Unsupported
+}
+
+/// Altyazı parçası indirilmeye değer mi?
+///
+/// fMP4'e sarılmış altyazılar (`codecs="wvtt"`/`"stpp"`, ya da `#EXT-X-MAP`
+/// taşıyan bir HLS altyazı playlisti) mp4 kutularının açılmasını gerektiriyor.
+/// Bu ayrı bir iş ve yarım yapılırsa oynatıcının açamayacağı bir dosya çıkıyor;
+/// baştan eleniyor.
+pub fn subtitle_downloadable(track: &MediaTrack) -> bool {
+    if track.init.is_some() {
+        return false;
+    }
+    match track.codecs.as_deref() {
+        Some(c) => {
+            let c = c.to_ascii_lowercase();
+            !(c.contains("wvtt") || c.contains("stpp"))
+        }
+        None => true,
+    }
+}
+
+/// Tercihe göre indirilecek altyazıları seçer.
+///
+/// `Auto`: dil tutarsa o, tutmazsa listenin ilki. Liste `DEFAULT=YES` /
+/// `Role="main"` olan başa alınmış geliyor, yani "ilki" sağlayıcının kendi
+/// varsayılanı demek.
+pub fn select_subtitles<'a>(
+    tracks: &'a [MediaTrack],
+    mode: SubtitleMode,
+    language: Option<&str>,
+) -> Vec<&'a MediaTrack> {
+    let uygun: Vec<&MediaTrack> = tracks.iter().filter(|t| subtitle_downloadable(t)).collect();
+    if uygun.is_empty() {
+        return Vec::new();
+    }
+    match mode {
+        SubtitleMode::Off => Vec::new(),
+        SubtitleMode::All => uygun,
+        SubtitleMode::Auto => {
+            if let Some(dil) = language {
+                if let Some(t) = uygun.iter().find(|t| {
+                    t.language
+                        .as_deref()
+                        .is_some_and(|l| dil_eslesiyor(l, dil))
+                }) {
+                    return vec![t];
+                }
+            }
+            vec![uygun[0]]
+        }
+    }
+}
+
+/// `tr` ile `tr-TR` aynı dil sayılıyor: manifestler ikisini de yazıyor ve
+/// kullanıcının ayarına birebir eşitlik aramak çoğu yayında hiç altyazı
+/// bulamamak demek olurdu.
+fn dil_eslesiyor(manifest: &str, istenen: &str) -> bool {
+    let a = manifest.split(['-', '_']).next().unwrap_or(manifest);
+    let b = istenen.split(['-', '_']).next().unwrap_or(istenen);
+    a.eq_ignore_ascii_case(b)
+}
+
+/// Altyazı dosyasının adı: `film.tr.vtt`.
+///
+/// `stem` videonun uzantısız adı. Aynı dilde birden çok altyazı olabiliyor
+/// (ör. "Türkçe" ve "Türkçe (işitme engelli)"); ikinciden itibaren parçanın
+/// adı da ekleniyor, yoksa dosyalar birbirinin üzerine yazardı.
+pub fn subtitle_file_name(
+    stem: &str,
+    track: &MediaTrack,
+    format: SubtitleFormat,
+    kullanilan: &mut Vec<String>,
+) -> String {
+    let uzanti = match format {
+        SubtitleFormat::Ttml => "ttml",
+        _ => "vtt",
+    };
+    let etiket = track
+        .language
+        .as_deref()
+        .or(track.name.as_deref())
+        .map(crate::download::http::sanitize_file_name)
+        .filter(|s| !s.is_empty());
+
+    let taban = match etiket {
+        Some(e) => format!("{stem}.{e}"),
+        None => stem.to_string(),
+    };
+
+    let mut aday = format!("{taban}.{uzanti}");
+    if kullanilan.contains(&aday) {
+        if let Some(ad) = track.name.as_deref().map(crate::download::http::sanitize_file_name) {
+            if !ad.is_empty() {
+                aday = format!("{taban}.{ad}.{uzanti}");
+            }
+        }
+    }
+    let mut sayac = 2;
+    while kullanilan.contains(&aday) {
+        aday = format!("{taban}.{sayac}.{uzanti}");
+        sayac += 1;
+    }
+    kullanilan.push(aday.clone());
+    aday
+}
+
+/// Kullanıcının kalite tercihi.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Quality {
+    #[default]
     Best,
     Worst,
     /// En fazla bu yükseklik (`720` → 720p ve altı).
@@ -473,6 +648,8 @@ pub struct MediaPlan {
     pub estimated_size: u64,
     /// ffmpeg olmadan tamamlanamaz mı? (Ayrı ses varsa evet.)
     pub needs_ffmpeg: bool,
+    /// İnecek altyazılar, parçaları çözülmüş. Boş olması normal.
+    pub subtitles: Vec<MediaTrack>,
 }
 
 impl MediaPlan {
@@ -531,19 +708,32 @@ pub async fn resolve_track(
     Ok(cozulmus)
 }
 
-/// Manifestten indirilebilir bir plan çıkarır.
+/// Plan çıkarılırken ayarlardan gelen tercihler.
 ///
-/// `ffmpeg`: ffmpeg bulundu mu. Yalnızca çıktı uzantısını etkiliyor; birleştirme
-/// gerekip gerekmediği kararı ondan bağımsız.
+/// Ayrı bir yapı: bunlar birlikte değişen ve birlikte anlam kazanan
+/// değerler, ve `build_plan` uzun bir konumsal argüman listesiyle çağrılınca
+/// hangi `Option<&str>`in dil hangisinin başka bir şey olduğu okunmaz hale
+/// geliyordu.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PlanOptions<'a> {
+    pub quality: Quality,
+    /// Ses ve altyazı için dil tercihi (`tr`, `en`…).
+    pub language: Option<&'a str>,
+    pub subtitles: SubtitleMode,
+    /// ffmpeg bulundu mu. Yalnızca çıktı uzantısını etkiliyor; birleştirme
+    /// gerekip gerekmediği kararı ondan bağımsız.
+    pub ffmpeg: bool,
+}
+
+/// Manifestten indirilebilir bir plan çıkarır.
 pub async fn build_plan(
     client: &reqwest::Client,
     manifest: &MediaManifest,
     selection: &MediaSelection,
-    quality: Quality,
-    language: Option<&str>,
+    options: &PlanOptions<'_>,
     headers: &[(String, String)],
-    ffmpeg: bool,
 ) -> Result<MediaPlan> {
+    let PlanOptions { quality, language, subtitles: altyazi_kipi, ffmpeg } = *options;
     if manifest.live {
         return Err(DownloadError::Manifest(
             "bu bir canlı yayın; kaydetme desteklenmiyor".into(),
@@ -582,6 +772,18 @@ pub async fn build_plan(
         return Err(DownloadError::Manifest("seçilen parçada hiç segment yok".into()));
     }
 
+    // Altyazılar videoyu **hiçbir koşulda** engellemiyor: çözülemeyen bir
+    // altyazı playlisti atlanıyor, indirme sürüyor. Tersi, ikincil bir dosya
+    // yüzünden asıl işi iptal etmek olurdu (bkz. `docs/decisions.md` #29).
+    let mut subtitles: Vec<MediaTrack> = Vec::new();
+    for aday in select_subtitles(&manifest.subtitles, altyazi_kipi, language) {
+        match resolve_track(client, aday, headers).await {
+            Ok(cozulmus) if !cozulmus.segments.is_empty() => subtitles.push(cozulmus),
+            Ok(_) => log::warn!("altyazı parçası boş, atlandı: {}", aday.id),
+            Err(e) => log::warn!("altyazı parçası çözülemedi, atlandı ({}): {e}", aday.id),
+        }
+    }
+
     let needs_ffmpeg = audio.is_some();
     let container = video.container;
     let uzanti = output_extension(container, needs_ffmpeg, ffmpeg);
@@ -597,6 +799,7 @@ pub async fn build_plan(
         container,
         estimated_size: tahmin,
         needs_ffmpeg,
+        subtitles,
     })
 }
 
@@ -641,6 +844,9 @@ pub struct MediaInfo {
     pub duration_seconds: Option<f64>,
     pub video: Vec<TrackInfo>,
     pub audio: Vec<TrackInfo>,
+    /// İndirilebilir altyazılar. fMP4'e sarılmış olanlar burada görünmüyor:
+    /// listede olup inmemeleri kullanıcıya yalan söylemek olurdu.
+    pub subtitles: Vec<TrackInfo>,
     /// Ayarlardaki tercihle seçilecek parçalar.
     ///
     /// Arayüzün açılışta hangi seçeneği işaretleyeceğini bilmesi gerekiyor;
@@ -718,6 +924,12 @@ pub async fn describe(
         duration_seconds: sure.filter(|d| *d > 0.0),
         video: manifest.video.iter().map(TrackInfo::from).collect(),
         audio: manifest.audio.iter().map(TrackInfo::from).collect(),
+        subtitles: manifest
+            .subtitles
+            .iter()
+            .filter(|t| subtitle_downloadable(t))
+            .map(TrackInfo::from)
+            .collect(),
         default_video: varsayilan.map(|t| t.id.clone()),
         default_audio: varsayilan_ses.map(|t| t.id.clone()),
         requires_ffmpeg: ses_ayri,
@@ -876,5 +1088,145 @@ mod tests {
     fn byte_araligi_basligi() {
         let r = ByteRange { offset: 100, length: 50 };
         assert_eq!(r.header(), "bytes=100-149");
+    }
+
+    // --- Altyazı (karar #29) ---
+
+    fn altyazi(dil: &str, ad: &str, varsayilan: bool) -> MediaTrack {
+        MediaTrack {
+            id: format!("sub:{dil}:{ad}"),
+            kind: TrackKind::Subtitle,
+            language: Some(dil.to_string()),
+            name: Some(ad.to_string()),
+            default_track: varsayilan,
+            segments: vec![MediaSegment::plain(format!("https://cdn/{dil}.vtt"))],
+            ..MediaTrack::default()
+        }
+    }
+
+    #[test]
+    fn altyazi_kipi_cozuluyor() {
+        assert_eq!(SubtitleMode::parse("off"), SubtitleMode::Off);
+        assert_eq!(SubtitleMode::parse(" KAPALI "), SubtitleMode::Off);
+        assert_eq!(SubtitleMode::parse("all"), SubtitleMode::All);
+        assert_eq!(SubtitleMode::parse("auto"), SubtitleMode::Auto);
+        // Tanınmayan ve boş değer: altyazıyı sessizce kesmek yerine varsayılan.
+        assert_eq!(SubtitleMode::parse("zırva"), SubtitleMode::Auto);
+        assert_eq!(SubtitleMode::parse(""), SubtitleMode::Auto);
+    }
+
+    #[test]
+    fn altyazi_secimi_dile_ve_varsayilana_bakiyor() {
+        let liste = vec![altyazi("en", "English", true), altyazi("tr", "Türkçe", false)];
+
+        assert!(select_subtitles(&liste, SubtitleMode::Off, Some("tr")).is_empty());
+        assert_eq!(select_subtitles(&liste, SubtitleMode::All, None).len(), 2);
+
+        // Dil tutuyor.
+        let s = select_subtitles(&liste, SubtitleMode::Auto, Some("tr"));
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0].language.as_deref(), Some("tr"));
+
+        // `tr-TR` ile `tr` aynı dil.
+        let s = select_subtitles(&liste, SubtitleMode::Auto, Some("tr-TR"));
+        assert_eq!(s[0].language.as_deref(), Some("tr"));
+
+        // Dil tutmuyor: listenin ilki (sağlayıcının varsayılanı).
+        let s = select_subtitles(&liste, SubtitleMode::Auto, Some("de"));
+        assert_eq!(s[0].language.as_deref(), Some("en"));
+
+        // Dil tercihi yok: yine ilki.
+        let s = select_subtitles(&liste, SubtitleMode::Auto, None);
+        assert_eq!(s[0].language.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn sarili_altyazi_secime_hic_girmiyor() {
+        let mut wvtt = altyazi("tr", "Türkçe", true);
+        wvtt.codecs = Some("wvtt".into());
+        let liste = vec![wvtt, altyazi("en", "English", false)];
+
+        // `All` bile onu almıyor: indirilse oynatıcının açamayacağı bir dosya
+        // çıkardı.
+        let hepsi = select_subtitles(&liste, SubtitleMode::All, None);
+        assert_eq!(hepsi.len(), 1);
+        assert_eq!(hepsi[0].language.as_deref(), Some("en"));
+
+        // `Auto` da varsayılan işaretli olana rağmen ona düşmüyor.
+        let oto = select_subtitles(&liste, SubtitleMode::Auto, Some("tr"));
+        assert_eq!(oto[0].language.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn tumu_elenirse_secim_bos() {
+        let mut wvtt = altyazi("tr", "Türkçe", true);
+        wvtt.codecs = Some("stpp".into());
+        assert!(select_subtitles(&[wvtt], SubtitleMode::All, None).is_empty());
+    }
+
+    #[test]
+    fn altyazi_bicimi_inen_byteldan_anlasiliyor() {
+        assert_eq!(sniff_subtitle(b"WEBVTT\n\n"), SubtitleFormat::WebVtt);
+        assert_eq!(sniff_subtitle("\u{feff}WEBVTT\n".as_bytes()), SubtitleFormat::WebVtt);
+        assert_eq!(sniff_subtitle(b"\n  WEBVTT"), SubtitleFormat::WebVtt);
+        assert_eq!(sniff_subtitle(br#"<?xml version="1.0"?><tt>"#), SubtitleFormat::Ttml);
+        // fMP4 kutusu: `....ftyp`
+        assert_eq!(
+            sniff_subtitle(&[0, 0, 0, 0x18, b'f', b't', b'y', b'p']),
+            SubtitleFormat::Unsupported
+        );
+        assert_eq!(sniff_subtitle(b""), SubtitleFormat::Unsupported);
+    }
+
+    #[test]
+    fn altyazi_dosya_adi_dili_tasiyor() {
+        let mut kullanilan = Vec::new();
+        let t = altyazi("tr", "Türkçe", false);
+        assert_eq!(
+            subtitle_file_name("film", &t, SubtitleFormat::WebVtt, &mut kullanilan),
+            "film.tr.vtt"
+        );
+        assert_eq!(
+            subtitle_file_name("film", &t, SubtitleFormat::Ttml, &mut kullanilan),
+            "film.tr.ttml"
+        );
+    }
+
+    #[test]
+    fn ayni_dilde_iki_altyazi_birbirini_ezmiyor() {
+        let mut kullanilan = Vec::new();
+        let a = altyazi("tr", "Türkçe", true);
+        let b = altyazi("tr", "Türkçe (işitme engelli)", false);
+
+        let ilk = subtitle_file_name("film", &a, SubtitleFormat::WebVtt, &mut kullanilan);
+        let ikinci = subtitle_file_name("film", &b, SubtitleFormat::WebVtt, &mut kullanilan);
+        assert_eq!(ilk, "film.tr.vtt");
+        assert_ne!(ilk, ikinci);
+        assert!(ikinci.starts_with("film.tr."));
+        assert!(ikinci.ends_with(".vtt"));
+
+        // Adı da aynı olan üçüncü bir parça sayıya düşüyor.
+        let ucuncu = subtitle_file_name("film", &a, SubtitleFormat::WebVtt, &mut kullanilan);
+        assert_ne!(ucuncu, ilk);
+        assert_ne!(ucuncu, ikinci);
+    }
+
+    #[test]
+    fn dilsiz_altyazi_ada_dusuyor() {
+        let mut kullanilan = Vec::new();
+        let mut t = altyazi("tr", "Forced", false);
+        t.language = None;
+        assert_eq!(
+            subtitle_file_name("film", &t, SubtitleFormat::WebVtt, &mut kullanilan),
+            "film.Forced.vtt"
+        );
+
+        // Ne dil ne ad: video adının yanına sade `.vtt`.
+        let mut kullanilan = Vec::new();
+        t.name = None;
+        assert_eq!(
+            subtitle_file_name("film", &t, SubtitleFormat::WebVtt, &mut kullanilan),
+            "film.vtt"
+        );
     }
 }

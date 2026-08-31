@@ -177,6 +177,13 @@ export function AddDialog({
 
   const secilenVideo = media?.video.find((t) => t.id === videoId) ?? media?.video[0] ?? null;
   const sesSecilebilir = !!media && media.audio.length > 0 && secilenVideo?.kind === 'video';
+
+  // Altyazı seçimi ayarlarda; burada yalnızca ne olacağı söyleniyor. İlk üç
+  // dil yeter — uzun bir liste, asıl karar olan kalite/ses seçicisini bastırır.
+  const altyaziEtiketi = (media?.subtitles ?? [])
+    .slice(0, 3)
+    .map((t) => t.language ?? t.name ?? '?')
+    .join(', ');
   const sessiz = audioId === SESSIZ;
   /** Bu seçimle ffmpeg gerçekten gerekiyor mu? */
   const ffmpegGerekli = sesSecilebilir && !sessiz;
@@ -345,6 +352,15 @@ export function AddDialog({
                         <option value={SESSIZ}>Ses indirme — yalnızca görüntü</option>
                       </select>
                     </label>
+                  )}
+
+                  {media.subtitles.length > 0 && (
+                    <p className="field-hint">
+                      Bu yayında {media.subtitles.length} altyazı var
+                      {altyaziEtiketi && <> ({altyaziEtiketi})</>}. Ayarlardaki tercihe
+                      göre videonun yanına <code>.vtt</code> dosyası olarak inecek;
+                      Ayarlar → Altyazı bölümünden kapatabilirsin.
+                    </p>
                   )}
 
                   {ffmpegEksik && (

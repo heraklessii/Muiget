@@ -960,3 +960,118 @@ yalnızca kullanıcı isterse çalışıyor.
   yazmaya kalkınca ffmpeg akışı ogg'a koyamayıp hata veriyor.
 - `+faststart` yalnızca MP4 ailesinde ekleniyor; `.mp3`/`.opus` çıktısında
   ffmpeg onu geçersiz seçenek sayıp duruyor.
+
+---
+
+## 29. Altyazı: varsayılan açık, metin düzeyinde birleştirme, videoyu asla düşürmez
+
+**Bağlam:** Faz 6'nın açık kalan maddesi. HLS master playlistindeki
+`#EXT-X-MEDIA:TYPE=SUBTITLES` ve DASH'in `contentType="text"` AdaptationSet'i
+şimdiye kadar ayrıştırma anında atlanıyordu. Yabancı dildeki bir yayını
+altyazısız indirmek işi yarım bırakıyor ve IDM bunu yapıyor.
+
+**Karar:**
+
+1. Altyazılar ayrı bir liste (`MediaManifest.subtitles`), video/ses seçimine
+   hiç karışmıyor.
+2. Varsayılan **açık** (`media_subtitles: "auto"`): dil tercihine uyan, o yoksa
+   yayının kendi varsayılanı tek altyazı iniyor. `all` hepsini, `off` hiçbirini
+   indiriyor.
+3. Parçalar **metin düzeyinde** birleştiriliyor (`media/vtt.rs`), uç uca
+   eklenmiyor.
+4. Çıktı videonun yanına, aynı gövdeyle: `film.mp4` → `film.tr.vtt`.
+5. Altyazı **hiçbir koşulda** indirmeyi düşürmüyor.
+6. fMP4'e sarılmış altyazılar (`codecs="wvtt"`/`"stpp"`) baştan eleniyor.
+
+**Gerekçe:**
+
+- **Neden varsayılan açık:** kapalı bir özellik görünmeyen bir özellik. Bedel
+  gerçekten küçük — bir saatlik filmin altyazısı birkaç yüz KB ve videonun
+  yanında, adı açık, ayrı bir dosya. Buna karşılık yabancı dildeki bir videoyu
+  altyazısız indirmiş olmak, kullanıcının ancak izlemeye başlayınca fark
+  edeceği bir eksiklik. Kapatmak Ayarlar'da tek tık.
+
+- **Neden uç uca eklemek yetmiyor:** her HLS altyazı parçası kendi başına tam
+  bir WebVTT belgesi, yani her birinin başında `WEBVTT` satırı var. Art arda
+  yazılan bir dosyada oynatıcı ikinci başlığı bir cue sanıp ya orada kesiyor ya
+  da dosyayı tamamen reddediyor. Video parçalarında işe yarayan yöntem
+  (karar #25) burada işe yaramıyor.
+
+- **Zaman ekseni ilk parçanın haritasına göre hizalanıyor.** HLS altyazısı
+  `X-TIMESTAMP-MAP=LOCAL:...,MPEGTS:...` ile MPEG-TS saatine bağlanıyor ve o
+  saat tipik olarak 900000'de (10 sn) başlıyor. Mutlak değeri korumak, ffmpeg
+  `.mp4`e çevirdiğinde (orada zaman ekseni sıfırlanıyor) altyazıyı 10 saniye
+  kaydırırdı. İlk parçanın offsetini taban almak iki çıktıda da doğru sonuç
+  veriyor.
+
+- **Parça sınırını aşan cue'lar tekilleştiriliyor:** sağlayıcılar böyle bir
+  cue'yu her iki parçaya da yazıyor (oynatıcı hangisinden başlarsa başlasın
+  görsün diye). Birleşik dosyada bu, aynı satırın iki kez görünmesi demek.
+
+- **Biçim inen byte'lardan anlaşılıyor**, adresten ya da `mimeType`ten değil:
+  sağlayıcılar `.vtt` uzantısının arkasına TTML, `application/mp4` etiketinin
+  arkasına düz WebVTT koyabiliyor. Yanlış biçimde yazılan bir altyazı dosyası
+  hiçbir oynatıcıda açılmıyor.
+
+- **TTML yalnızca tek parçalıysa yazılıyor.** Her TTML parçası kendi `<tt>` kök
+  öğesini taşıyor; ikisini uç uca eklemek geçersiz XML veriyor. Yarım bir
+  çözüm, kullanıcıya açılmayan bir dosya vermek olurdu.
+
+- **fMP4'e sarılmış altyazı neden listede yok:** `wvtt`/`stpp` mp4 kutularının
+  açılmasını gerektiriyor; bu ayrı bir iş. Listede görünüp inmemeleri
+  kullanıcıya yalan söylemek olurdu, o yüzden `describe` çıktısından da
+  eleniyorlar.
+
+- **Neden videoyu düşürmüyor:** kullanıcı bir filmi indirdi; altyazı
+  sunucusunun 503 vermesi o filmi çöpe atmak için sebep değil. Ne olduğu yine
+  de bir uyarıyla söyleniyor — sessizce eksik bir dosya bırakmak da kabul
+  edilemezdi. Uyarı, varsa mevcut uyarının (tipik olarak "ffmpeg yok")
+  **yanına** ekleniyor: üstüne yazsaydı, ffmpeg'i olmayan herkeste altyazı
+  hatası sessizce yutulurdu.
+
+- **Adım nereye kondu:** birleştirmeden *sonra* (ffmpeg düşerse klasörde
+  sahipsiz `.vtt` kalmasın), `finalize`dan *önce* (orada durum `Completed`
+  oluyor; sonrasına bırakılsaydı "tamamlandı" diyen bir indirmenin altyazısı
+  hâlâ iniyor olurdu ve klasörü o anda açan kullanıcı dosyayı bulamazdı).
+
+- **Devam noktası tutulmuyor.** Birkaç yüz KB için `.muiget` metasına ayrı bir
+  alan taşımak, onu bozacak bir hata riskine değmiyor; yarım kalan altyazı
+  sürdürmede baştan iniyor.
+
+**Kapsam dışı:** DASH'in fMP4 altyazıları, `#EXT-X-DISCONTINUITY` sonrası
+zaman ekseni sıfırlanan yayınlar, ve altyazının videoya *gömülmesi*
+(soft-mux). Sonuncusu ffmpeg'le mümkün ama ayrı bir `.vtt` dosyası her
+oynatıcıda çalışıyor ve kullanıcı isterse silebiliyor.
+
+---
+
+## 30. İlerleme olayları biriktiriliyor, chunk başına gönderilmiyor
+
+**Bağlam:** `download::worker` her yazılan chunk için kanala bir
+`WorkerEvent::Progress` gönderiyordu. reqwest'in verdiği chunk tipik olarak
+8–64 KB; 100 MB/s'lik bir bağlantıda bu segment başına saniyede binlerce mesaj
+demek, sekiz paralel segmentle on binlerce. Aynı desen akış boru hattında da
+vardı (`FetchEvent::Bytes`).
+
+**Karar:** Olaylar 256 KB **ya da** 100 ms'de bir gönderiliyor (hangisi önce
+dolarsa). `worker.rs`'te bunu bir `IlerlemeBiriktirici` yapıyor; `Drop`
+uygulaması sayesinde fonksiyonun hangi `return`ünden çıkılırsa çıkılsın kalan
+byte kaybolmuyor.
+
+**Gerekçe:**
+
+- **Neden güvenli:** bu olayların **tek** tüketicisi hız ölçer
+  (`SpeedMeter::record`). İlerleme çubuğunun gerçek kaynağı
+  `SegmentContext.downloaded` atomiği; o her chunk'ta güncellenmeye devam
+  ediyor. Yani biriktirme yalnızca göstergeyi etkileyebilirdi — ve EWMA'nın
+  yarı-ömrü 3 saniye olduğu için 100 ms'lik bir pencere ölçümü gözle görülür
+  biçimde değiştirmiyor.
+- **Neden iki eşik:** yalnızca bayt eşiğine bakan bir kod, 20 KB/s'lik bir
+  bağlantıda on saniyede bir güncelleme yapar ve hız göstergesi donmuş görünür.
+  Yalnızca süre eşiğine bakmak ise hızlı bağlantıda mesaj sayısını
+  sabitlemezdi.
+
+**Ölçülmedi.** Bu bir mesaj sayısı azaltması; gerçek indirme hızına etkisi
+sahada ölçülmedi ve "şu kadar hızlandı" diye bir iddia yok. Gerekçe aritmetik:
+saniyede on binlerce kanal mesajı ve o kadar görev uyandırması, karşılığında
+hiçbir bilgi kazandırmıyordu.

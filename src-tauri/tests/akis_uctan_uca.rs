@@ -902,3 +902,265 @@ async fn eksik_parca_indirmeyi_dusuruyor() {
     // sanıp izlemeye kalkardı.
     assert!(!PathBuf::from(&anlik.target_path).exists());
 }
+
+/* -------------------------------------------------------------------------
+ * Altyazı (karar #29)
+ * ---------------------------------------------------------------------- */
+
+/// Altyazılı bir master playlist: tek kalite, iki altyazı dili.
+///
+/// Altyazı parçaları bilerek **ikişer** tane: birleştirmenin gerçekten metin
+/// düzeyinde olduğunu — parçaların uç uca eklenmediğini — ancak iki parça
+/// gösterebiliyor. İkinci parçanın zaman haritası da birinciden ileride, yani
+/// kaydırma da sınanıyor.
+fn altyazili_dosyalar() -> (HashMap<String, Yanit>, Vec<u8>) {
+    let (mut yollar, beklenen) = hls_dosyalari("/v", 8 * 1024, 3);
+
+    for (dil, metin) in [("tr", ("Merhaba", "Dünya")), ("en", ("Hello", "World"))] {
+        let a = format!(
+            "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\n\n\
+             00:00:00.000 --> 00:00:02.000\n{}\n",
+            metin.0
+        );
+        // İkinci parça 10 saniye ileride başlıyor.
+        let b = format!(
+            "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:1800000\n\n\
+             00:00:00.000 --> 00:00:02.000\n{}\n",
+            metin.1
+        );
+        yollar.insert(format!("/subs/{dil}0.vtt"), Yanit::metin(&a, "text/vtt"));
+        yollar.insert(format!("/subs/{dil}1.vtt"), Yanit::metin(&b, "text/vtt"));
+
+        let playlist = format!(
+            "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n#EXT-X-PLAYLIST-TYPE:VOD\n\
+             #EXTINF:10.0,\n/subs/{dil}0.vtt\n#EXTINF:10.0,\n/subs/{dil}1.vtt\n#EXT-X-ENDLIST\n"
+        );
+        yollar.insert(format!("/subs/{dil}.m3u8"), Yanit::metin(&playlist, M3U8));
+    }
+
+    let master = "#EXTM3U\n\
+        #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"s\",NAME=\"English\",LANGUAGE=\"en\",URI=\"/subs/en.m3u8\"\n\
+        #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"s\",NAME=\"Türkçe\",LANGUAGE=\"tr\",DEFAULT=YES,URI=\"/subs/tr.m3u8\"\n\
+        #EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360,SUBTITLES=\"s\"\n\
+        /v/list.m3u8\n";
+    yollar.insert("/master.m3u8".to_string(), Yanit::metin(master, M3U8));
+
+    (yollar, beklenen)
+}
+
+/// Videonun yanına yazılan altyazı dosyalarını (ad, içerik) olarak listeler.
+async fn altyazilari_oku(hedef: &str) -> Vec<(String, String)> {
+    let yol = PathBuf::from(hedef);
+    let klasor = yol.parent().unwrap().to_path_buf();
+    let mut cikti = Vec::new();
+    let mut girdiler = tokio::fs::read_dir(&klasor).await.unwrap();
+    while let Ok(Some(g)) = girdiler.next_entry().await {
+        let ad = g.file_name().to_string_lossy().into_owned();
+        if ad.ends_with(".vtt") || ad.ends_with(".ttml") {
+            cikti.push((ad, tokio::fs::read_to_string(g.path()).await.unwrap()));
+        }
+    }
+    cikti.sort();
+    cikti
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn varsayilan_altyazi_videonun_yanina_yaziliyor() {
+    let (yollar, beklenen) = altyazili_dosyalar();
+    let sunucu = TestSunucusu::baslat(yollar).await;
+    let dir = tempfile::tempdir().unwrap();
+
+    // Dil tercihi yok: sağlayıcının varsayılan işaretlediği (tr) inmeli.
+    let manager = DownloadManager::new(test_config()).unwrap();
+    let id = manager
+        .start(sunucu.url("/master.m3u8"), dir.path().to_path_buf())
+        .unwrap();
+
+    assert_eq!(tamamlanmayi_bekle(&manager, &id).await, DownloadStatus::Completed);
+    let anlik = manager.get(&id).unwrap();
+
+    // Video bozulmamış olmalı: altyazı adımı ona hiç dokunmuyor.
+    assert_eq!(tokio::fs::read(&anlik.target_path).await.unwrap(), beklenen);
+
+    let altyazilar = altyazilari_oku(&anlik.target_path).await;
+    assert_eq!(altyazilar.len(), 1, "tek bir altyazı bekleniyordu: {altyazilar:?}");
+    let (ad, icerik) = &altyazilar[0];
+    assert!(ad.ends_with(".tr.vtt"), "beklenmeyen altyazı adı: {ad}");
+
+    // Tek başlık: parçalar uç uca eklenmiş olsaydı iki tane olurdu.
+    assert_eq!(icerik.matches("WEBVTT").count(), 1, "birleştirme yapılmamış:\n{icerik}");
+    assert!(icerik.contains("Merhaba"));
+    assert!(icerik.contains("Dünya"));
+    // İkinci parça zaman haritasına göre 10 saniye kaydırılmış olmalı.
+    assert!(icerik.contains("00:00:00.000 --> 00:00:02.000"), "ilk cue kaymış:\n{icerik}");
+    assert!(icerik.contains("00:00:10.000 --> 00:00:12.000"), "ikinci cue kaymamış:\n{icerik}");
+    // Ham manifest satırı sızmamalı.
+    assert!(!icerik.contains("TIMESTAMP-MAP"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn dil_tercihi_altyaziya_da_uygulaniyor() {
+    let (yollar, _) = altyazili_dosyalar();
+    let sunucu = TestSunucusu::baslat(yollar).await;
+    let dir = tempfile::tempdir().unwrap();
+
+    let manager = DownloadManager::new(ManagerConfig {
+        media_language: "en".to_string(),
+        ..test_config()
+    })
+    .unwrap();
+    let id = manager
+        .start(sunucu.url("/master.m3u8"), dir.path().to_path_buf())
+        .unwrap();
+
+    assert_eq!(tamamlanmayi_bekle(&manager, &id).await, DownloadStatus::Completed);
+    let anlik = manager.get(&id).unwrap();
+
+    let altyazilar = altyazilari_oku(&anlik.target_path).await;
+    assert_eq!(altyazilar.len(), 1);
+    assert!(
+        altyazilar[0].0.ends_with(".en.vtt"),
+        "dil tercihi uygulanmadı: {}",
+        altyazilar[0].0
+    );
+    assert!(altyazilar[0].1.contains("Hello"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn hepsi_kipinde_her_dil_ayri_dosyaya_iniyor() {
+    let (yollar, _) = altyazili_dosyalar();
+    let sunucu = TestSunucusu::baslat(yollar).await;
+    let dir = tempfile::tempdir().unwrap();
+
+    let manager = DownloadManager::new(ManagerConfig {
+        media_subtitles: "all".to_string(),
+        ..test_config()
+    })
+    .unwrap();
+    let id = manager
+        .start(sunucu.url("/master.m3u8"), dir.path().to_path_buf())
+        .unwrap();
+
+    assert_eq!(tamamlanmayi_bekle(&manager, &id).await, DownloadStatus::Completed);
+    let anlik = manager.get(&id).unwrap();
+
+    let altyazilar = altyazilari_oku(&anlik.target_path).await;
+    let adlar: Vec<&str> = altyazilar.iter().map(|(a, _)| a.as_str()).collect();
+    assert_eq!(adlar.len(), 2, "iki altyazı bekleniyordu: {adlar:?}");
+    assert!(adlar.iter().any(|a| a.ends_with(".tr.vtt")), "{adlar:?}");
+    assert!(adlar.iter().any(|a| a.ends_with(".en.vtt")), "{adlar:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn altyazi_kapaliyken_hic_istenmiyor() {
+    let (yollar, _) = altyazili_dosyalar();
+    let sunucu = TestSunucusu::baslat(yollar).await;
+    let dir = tempfile::tempdir().unwrap();
+
+    let manager = DownloadManager::new(ManagerConfig {
+        media_subtitles: "off".to_string(),
+        ..test_config()
+    })
+    .unwrap();
+    let id = manager
+        .start(sunucu.url("/master.m3u8"), dir.path().to_path_buf())
+        .unwrap();
+
+    assert_eq!(tamamlanmayi_bekle(&manager, &id).await, DownloadStatus::Completed);
+    let anlik = manager.get(&id).unwrap();
+
+    assert!(altyazilari_oku(&anlik.target_path).await.is_empty());
+    // Playlist bile istenmemeli: kapalıyken fazladan tek istek atılmıyor.
+    assert_eq!(sunucu.istek_sayisi("/subs/tr.m3u8"), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bozuk_altyazi_videoyu_dusurmuyor() {
+    let (mut yollar, beklenen) = altyazili_dosyalar();
+    // Varsayılan (tr) altyazının ikinci parçası kayıp: sunucu 404 dönecek.
+    yollar.remove("/subs/tr1.vtt");
+
+    let sunucu = TestSunucusu::baslat(yollar).await;
+    let dir = tempfile::tempdir().unwrap();
+    let manager = DownloadManager::new(test_config()).unwrap();
+    let id = manager
+        .start(sunucu.url("/master.m3u8"), dir.path().to_path_buf())
+        .unwrap();
+
+    // Asıl iddia bu: altyazı düşse de video tamamlanıyor.
+    assert_eq!(tamamlanmayi_bekle(&manager, &id).await, DownloadStatus::Completed);
+    let anlik = manager.get(&id).unwrap();
+    assert_eq!(tokio::fs::read(&anlik.target_path).await.unwrap(), beklenen);
+
+    // Yarım bir altyazı dosyası bırakılmamalı.
+    assert!(altyazilari_oku(&anlik.target_path).await.is_empty());
+    // Ama sessiz de kalınmıyor.
+    let uyari = anlik.warning.unwrap_or_default();
+    assert!(uyari.contains("altyazı"), "uyarı beklenmiyordu böyle: {uyari}");
+}
+
+/* -------------------------------------------------------------------------
+ * Olayların hangi parçaya ait olduğu
+ * ---------------------------------------------------------------------- */
+
+/// İlerleme olayları indirilen parçanın rolünü **kendileri** taşımalı.
+///
+/// Bu bir gerileme testi. Önceki sürümde rol, süpervizörde duran bir
+/// `AtomicBool` ile takip ediliyordu: boru hattı ses aşamasına geçerken
+/// bayrağı çeviriyor, olayları ise sınırsız bir kanal taşıyordu. Videonun son
+/// olayları hâlâ kanaldayken bayrak çevrildiğinde o olaylar **ses** sayacına
+/// yazılıyordu. Sonuç yalnızca yanlış bir ilerleme çubuğu değildi: devam
+/// noktası da o sayaçlardan yazıldığı için, sürdürülen indirme ses dosyasını
+/// video byte sayısına kadar sıfırla doldurup üstüne yazıyor ve sesi sessizce
+/// bozuyordu.
+///
+/// Bayrak kaldırıldı; rol artık olayın alanı. Test bunu doğrudan sınıyor:
+/// `TrackRole::Audio` verilen bir çağrının bütün olayları `Audio` olmalı.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ilerleme_olaylari_kendi_rolunu_tasiyor() {
+    use muiget_lib::download::throttle::{HostLimiter, RateLimiter};
+    use muiget_lib::media::crypt::KeyStore;
+    use muiget_lib::media::pipeline::{
+        download_track, FetchConfig, FetchContext, FetchEvent, TrackRole,
+    };
+    use muiget_lib::media::{MediaSegment, MediaTrack};
+
+    let (yollar, beklenen) = hls_dosyalari("/a", 4 * 1024, 3);
+    let sunucu = TestSunucusu::baslat(yollar).await;
+    let dir = tempfile::tempdir().unwrap();
+
+    let track = MediaTrack {
+        id: "ses".to_string(),
+        segments: (0..3)
+            .map(|i| MediaSegment::plain(sunucu.url(&format!("/a/s{i}.ts"))))
+            .collect(),
+        ..MediaTrack::default()
+    };
+
+    let ctx = FetchContext {
+        client: reqwest::Client::new(),
+        headers: Vec::new(),
+        rate: RateLimiter::unlimited(),
+        hosts: HostLimiter::new(4),
+        keys: std::sync::Arc::new(KeyStore::new()),
+        cancel: tokio_util::sync::CancellationToken::new(),
+        config: FetchConfig::default(),
+    };
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<FetchEvent>();
+    let hedef = dir.path().join("ses.mgpart");
+    download_track(&ctx, &track, TrackRole::Audio, &hedef, 0, 0, &tx)
+        .await
+        .unwrap();
+    drop(tx);
+
+    let mut yazilan = 0;
+    while let Some(olay) = rx.recv().await {
+        if let FetchEvent::SegmentWritten { role, .. } = olay {
+            assert_eq!(role, TrackRole::Audio, "olay yanlış parçaya yazılıyor");
+            yazilan += 1;
+        }
+    }
+    assert_eq!(yazilan, 3, "her parça için bir olay bekleniyordu");
+    assert_eq!(tokio::fs::read(&hedef).await.unwrap(), beklenen);
+}

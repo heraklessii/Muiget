@@ -200,6 +200,9 @@ pub struct ManagerConfig {
     /// kotası burada da geçerli, bu değer onun üstüne çıkamıyor.
     #[serde(default = "varsayilan_akis_paralelligi")]
     pub media_concurrency: usize,
+    /// Altyazı tercihi: `auto` | `all` | `off` (bkz. `docs/decisions.md` #29).
+    #[serde(default = "varsayilan_altyazi")]
+    pub media_subtitles: String,
 }
 
 impl Default for ManagerConfig {
@@ -223,6 +226,7 @@ impl Default for ManagerConfig {
             media_quality: varsayilan_kalite(),
             media_language: String::new(),
             media_concurrency: varsayilan_akis_paralelligi(),
+            media_subtitles: varsayilan_altyazi(),
         }
     }
 }
@@ -243,6 +247,15 @@ fn varsayilan_kalite() -> String {
 /// küçük parçalarda bağlantı kurma gecikmesini gizleyemiyor.
 fn varsayilan_akis_paralelligi() -> usize {
     6
+}
+
+/// Varsayılan olarak tek altyazı iniyor: manifestte varsa dil tercihine uyan,
+/// yoksa sağlayıcının varsayılanı. Altyazı birkaç yüz KB ve videonun yanında
+/// ayrı, adı açık bir dosya olarak duruyor — bedeli yok denecek kadar az, oysa
+/// yabancı dildeki bir videoyu altyazısız indirmek işi yarım bırakıyor.
+/// Kapatmak Ayarlar'dan tek tık.
+fn varsayilan_altyazi() -> String {
+    "auto".to_string()
 }
 
 /// İndirmeye özgü seçenekler motorun kökünde tanımlı: resume metası da onları
@@ -1280,10 +1293,8 @@ impl DownloadManager {
         protocol: media::Protocol,
         hosts: &Arc<HostLimiter>,
     ) -> Result<()> {
-        use std::sync::atomic::AtomicBool;
-
         use super::resume::MediaResume;
-        use media::pipeline::{FetchConfig, FetchContext, FetchEvent};
+        use media::pipeline::{FetchConfig, FetchContext, FetchEvent, TrackRole};
 
         let headers = entry.options.headers.clone();
 
@@ -1302,10 +1313,13 @@ impl DownloadManager {
             client,
             &manifest,
             &entry.selection,
-            media::Quality::parse(&config.media_quality),
-            dil,
+            &media::PlanOptions {
+                quality: media::Quality::parse(&config.media_quality),
+                language: dil,
+                subtitles: media::SubtitleMode::parse(&config.media_subtitles),
+                ffmpeg: ffmpeg.is_some(),
+            },
             &headers,
-            ffmpeg.is_some(),
         )
         .await?;
 
@@ -1482,10 +1496,6 @@ impl DownloadManager {
         });
 
         let (tx, mut rx) = mpsc::unbounded_channel::<FetchEvent>();
-        // Ses aşamasına geçildi mi? Parça olayları hangi sayaca yazılacağını
-        // bundan öğreniyor. Boru hattı hangi parçayı indirdiğini bilmiyor —
-        // bilmesi de gerekmiyor; sırayı burası kuruyor.
-        let ses_asamasi = Arc::new(AtomicBool::new(devam.video_done >= video_toplam));
 
         let gorev = {
             let ctx = ctx.clone();
@@ -1494,20 +1504,34 @@ impl DownloadManager {
             let video_part = video_part.clone();
             let audio_part = audio_part.clone();
             let tx = tx.clone();
-            let asama = ses_asamasi.clone();
             let (v_done, v_bytes) = (devam.video_done, devam.video_bytes);
             let (a_done, a_bytes) = (devam.audio_done, devam.audio_bytes);
 
             self.inner.runtime.spawn(async move {
                 if v_done < video.segments.len() {
-                    media::pipeline::download_track(&ctx, &video, &video_part, v_done, v_bytes, &tx)
-                        .await?;
+                    media::pipeline::download_track(
+                        &ctx,
+                        &video,
+                        TrackRole::Video,
+                        &video_part,
+                        v_done,
+                        v_bytes,
+                        &tx,
+                    )
+                    .await?;
                 }
                 if let Some(ses) = audio {
-                    asama.store(true, Ordering::Relaxed);
                     if a_done < ses.segments.len() {
-                        media::pipeline::download_track(&ctx, &ses, &audio_part, a_done, a_bytes, &tx)
-                            .await?;
+                        media::pipeline::download_track(
+                            &ctx,
+                            &ses,
+                            TrackRole::Audio,
+                            &audio_part,
+                            a_done,
+                            a_bytes,
+                            &tx,
+                        )
+                        .await?;
                     }
                 }
                 Ok::<(), DownloadError>(())
@@ -1530,20 +1554,33 @@ impl DownloadManager {
 
             match olay {
                 FetchEvent::Bytes(n) => olcer.record(n),
-                FetchEvent::SegmentWritten { index, written, .. } => {
+                FetchEvent::SegmentWritten { role, index, written, .. } => {
                     let mut state = entry.state.lock().unwrap();
                     if let Some(m) = state.media.as_mut() {
-                        if ses_asamasi.load(Ordering::Relaxed) {
-                            m.audio_done = index + 1;
-                            m.audio_bytes = written;
-                        } else {
-                            m.video_done = index + 1;
-                            m.video_bytes = written;
+                        match role {
+                            TrackRole::Audio => {
+                                m.audio_done = index + 1;
+                                m.audio_bytes = written;
+                            }
+                            TrackRole::Video => {
+                                m.video_done = index + 1;
+                                m.video_bytes = written;
+                            }
+                            // Altyazı ilerleme sayacına girmiyor: birkaç yüz KB
+                            // ve videonun yanında ayrı bir dosya.
+                            TrackRole::Subtitle => {}
                         }
                     }
                 }
-                FetchEvent::Retrying { index, attempt, error } => {
-                    log::warn!("akış parçası {index} yeniden deneniyor ({attempt}. deneme): {error}");
+                FetchEvent::Retrying { role, index, attempt, error } => {
+                    let ne = match role {
+                        TrackRole::Video => "video",
+                        TrackRole::Audio => "ses",
+                        TrackRole::Subtitle => "altyazı",
+                    };
+                    log::warn!(
+                        "{ne} parçası {index} yeniden deneniyor ({attempt}. deneme): {error}"
+                    );
                 }
             }
 
@@ -1576,6 +1613,7 @@ impl DownloadManager {
             Ok(Err(e)) => return Err(e),
             Err(e) => return Err(DownloadError::Other(format!("akış görevi çöktü: {e}"))),
         }
+
 
         // --- 8. Birleştirme / kap dönüşümü ---
         let birlestir = plan.audio.is_some();
@@ -1622,6 +1660,39 @@ impl DownloadManager {
         } else {
             video_part
         };
+
+        // --- 9. Altyazılar ---
+        //
+        // Video indi ve gerekiyorsa birleştirildi; sıra ikincil dosyada.
+        // Konum iki kısıtın kesişimi:
+        //
+        // * Birleştirmeden **sonra**, çünkü ffmpeg düşerse indirme başarısız
+        //   sayılıyor ve kullanıcının klasöründe sahipsiz `.vtt` kalmamalı.
+        // * `finalize`dan **önce**, çünkü orada durum `Completed` oluyor.
+        //   Sonrasına bırakılsaydı "tamamlandı" diyen bir indirmenin altyazısı
+        //   hâlâ inmeye devam ederdi; klasörü o anda açan kullanıcı dosyayı
+        //   bulamaz, uygulamayı o anda kapatan ise hiç bulamazdı.
+        //
+        // Devam noktası tutulmuyor: birkaç yüz KB için ayrı bir meta alanı
+        // taşımak, onu bozacak bir hata riskine değmez.
+        if !plan.subtitles.is_empty() && !cancel.is_cancelled() {
+            // Ayrı bir kanal ve alıcısı hemen düşürülüyor: ilerleme döngüsü
+            // bitti ve altyazı olayları sayaçlara girmiyor. Alıcıyı canlı
+            // tutmak, okunmayan `Bytes` olaylarını sonsuza kadar biriktirirdi.
+            let (tx_altyazi, _) = mpsc::unbounded_channel::<FetchEvent>();
+            if let Some(m) = altyazilari_indir(&ctx, &plan.subtitles, &target, &tx_altyazi).await {
+                let mut state = entry.state.lock().unwrap();
+                // Var olan uyarının (tipik olarak "ffmpeg yok") **üstüne
+                // yazılmıyor**, yanına ekleniyor: ffmpeg uyarısı ilk sırada
+                // duruyor ama altyazının inmediğini de kullanıcının görmesi
+                // gerek. Birini diğerine feda etmek, ffmpeg'i olmayan herkeste
+                // altyazı hatasının sessizce yutulması demekti.
+                state.warning = Some(match state.warning.take() {
+                    Some(onceki) => format!("{onceki} — {m}"),
+                    None => m,
+                });
+            }
+        }
 
         self.finalize(entry, &kaynak, &target).await?;
 
@@ -1979,6 +2050,86 @@ impl DownloadManager {
         }
         self.emit(entry);
         Ok(())
+    }
+}
+
+/// Seçilen altyazıları indirip videonun yanına yazar.
+///
+/// Dönen değer bir **uyarı**: altyazı hiçbir zaman indirmeyi düşürmüyor.
+/// Kullanıcı bir filmi indirdi; altyazı sunucusunun 503 vermesi o filmi
+/// çöpe atmak için sebep değil. Ne olduğu yine de söyleniyor, çünkü sessizce
+/// eksik bir dosya bırakmak da kabul edilemez.
+///
+/// Altyazı **video ve ses bittikten sonra**, doğrudan hedef dosyanın yanına
+/// yazılıyor — `.mgpart` ara adımı yok: dosya tek seferde ve küçük.
+async fn altyazilari_indir(
+    ctx: &Arc<media::pipeline::FetchContext>,
+    tracks: &[media::MediaTrack],
+    target: &Path,
+    events: &mpsc::UnboundedSender<media::pipeline::FetchEvent>,
+) -> Option<String> {
+    let govde = target
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "video".to_string());
+    let klasor = target.parent().map(Path::to_path_buf).unwrap_or_default();
+
+    let mut kullanilan: Vec<String> = Vec::new();
+    let mut basarisiz: Vec<String> = Vec::new();
+
+    for parca in tracks {
+        let etiket = parca
+            .language
+            .clone()
+            .or_else(|| parca.name.clone())
+            .unwrap_or_else(|| "altyazı".to_string());
+
+        let bolumler = match media::pipeline::fetch_subtitle_parts(ctx, parca, events).await {
+            Ok(b) => b,
+            Err(DownloadError::Cancelled) => return None,
+            Err(e) => {
+                log::warn!("altyazı inmedi ({etiket}): {e}");
+                basarisiz.push(etiket);
+                continue;
+            }
+        };
+
+        let Some(ilk) = bolumler.first() else { continue };
+        let bicim = media::sniff_subtitle(ilk);
+        let icerik: Vec<u8> = match bicim {
+            media::SubtitleFormat::WebVtt => {
+                let metinler: Vec<String> = bolumler
+                    .iter()
+                    .map(|b| String::from_utf8_lossy(b).into_owned())
+                    .collect();
+                media::vtt::merge(&metinler).into_bytes()
+            }
+            // TTML parçaları birleştirilemiyor: her biri kendi `<tt>` kök
+            // öğesini taşıyor ve ikisini uç uca eklemek geçersiz XML veriyor.
+            // Tek parçalıysa olduğu gibi yazılıyor.
+            media::SubtitleFormat::Ttml if bolumler.len() == 1 => ilk.clone(),
+            _ => {
+                log::warn!("altyazı biçimi desteklenmiyor, atlandı ({etiket})");
+                basarisiz.push(etiket);
+                continue;
+            }
+        };
+
+        let ad = media::subtitle_file_name(&govde, parca, bicim, &mut kullanilan);
+        let yol = klasor.join(&ad);
+        if let Err(e) = tokio::fs::write(&yol, &icerik).await {
+            log::warn!("altyazı yazılamadı ({ad}): {e}");
+            basarisiz.push(etiket);
+        }
+    }
+
+    if basarisiz.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Video indi ama şu altyazılar alınamadı: {}. Ayarlar → Altyazı bölümünden              kapatabilirsin.",
+            basarisiz.join(", ")
+        ))
     }
 }
 

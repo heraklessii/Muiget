@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Muiget",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Bağlantıları Muiget indirme yöneticisine gönderir. Çoklu bağlantı, kaldığı yerden devam.",
   "minimum_chrome_version": "116",
 

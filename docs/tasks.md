@@ -70,6 +70,10 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
       401 dönen bir sunucuya karşı koşuyor.
 - [ ] Segment sayısını indirme sürerken dinamik artırma/azaltma (tam adaptif
       algoritma — ilk sürüm yalnızca boşalan slotu değerlendiriyor)
+- [x] **İlerleme olayları biriktiriliyor** (karar #30). Chunk başına bir kanal
+      mesajı yerine 256 KB ya da 100 ms'de bir. Tek tüketici hız ölçer olduğu
+      için güvenli; ilerlemenin kaynağı zaten `downloaded` atomiği.
+      **Ölçülmedi** — mesaj sayısı azaltması, hız iddiası değil.
 - [x] **Host kotası indirmeler arasında paylaştırılıyor** (karar #17).
       `HostLimiter` host başına indirme sayısını tutuyor, süpervizör segment
       planını `fair_share()` ile sınırlıyor. Üç indirme × 2 segment = 6
@@ -171,8 +175,20 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
       PlayReady ayrıştırma anında, canlı yayın da öyle. Sessiz başarısızlık yok.
 - [x] **Uzantıda video yakalama** (karar #26). `webRequest` isteğe bağlı izin,
       varsayılan kapalı; manifest istekleri sekme başına `storage.session`de.
-- [ ] Altyazı parçaları (`#EXT-X-MEDIA:TYPE=SUBTITLES`, DASH `text`) —
-      şu an atlanıyor. WebVTT'yi indirip yanına yazmak küçük bir ek.
+- [x] **Altyazı parçaları** (karar #29). HLS `#EXT-X-MEDIA:TYPE=SUBTITLES` ve
+      DASH `contentType="text"` ayrıştırılıyor, indiriliyor ve videonun yanına
+      `film.tr.vtt` olarak yazılıyor. Parçalar uç uca eklenmiyor: her HLS
+      altyazı parçası kendi başına tam bir WebVTT belgesi olduğu için
+      `media/vtt.rs` cue düzeyinde birleştiriyor, `X-TIMESTAMP-MAP`e göre
+      hizalıyor ve parça sınırını aşan cue'ları tekilleştiriyor. Varsayılan
+      açık (`auto`); Ayarlar → Altyazı'dan `all`/`off` yapılabiliyor. Altyazı
+      hiçbir koşulda indirmeyi düşürmüyor.
+      **Denenmedi:** gerçek bir sağlayıcıya karşı hiç çalıştırılmadı; testler
+      yerel sunucuya karşı.
+- [ ] fMP4'e sarılmış altyazı (`codecs="wvtt"`/`"stpp"`) — mp4 kutusu açmayı
+      gerektiriyor, şu an baştan eleniyor ve listede de görünmüyor.
+- [ ] Çok parçalı TTML — her parça kendi `<tt>` kökünü taşıdığı için
+      birleştirilemiyor; yalnızca tek parçalı TTML yazılıyor.
 - [ ] `#EXT-X-DISCONTINUITY` sonrası kodek değişimi — parçalar yine iniyor ama
       ffmpeg olmadan birleşik dosya bazı oynatıcılarda tökezleyebilir.
 - [ ] yt-dlp entegrasyonu (opsiyonel dış bağımlılık olarak) — sayfa
@@ -268,7 +284,7 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
      9. oturumda gerçek uygulamada doğrulandı.
 
 2. **Video akışının sahada denenmesi** (10. oturumda eklendi, Faz 6). Kod ve
-   testler hazır — 16 uçtan uca test yerel sunucuya karşı koşuyor — ama
+   testler hazır — 22 uçtan uca test yerel sunucuya karşı koşuyor — ama
    **gerçek bir video sitesine karşı hiç denenmedi**. Denenmesi gerekenler:
    - Bir sitede uzantının "Video yakala" anahtarını açıp manifestin
      görünmesi, sonra indirilip **izlenebilmesi**.
@@ -277,6 +293,10 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
      kimse izlemedi.
    - Sağlayıcıya özgü tökezlemeler: imzalı/süreli parça adresleri, `Referer`
      isteyen CDN'ler, `#EXT-X-DISCONTINUITY` içeren yayınlar.
+   - **Altyazı** (13. oturum, karar #29): inen `.vtt` gerçekten bir oynatıcıda
+     açılıyor mu ve zamanlaması videoyla tutuyor mu? `X-TIMESTAMP-MAP`
+     hizalaması yerel testte doğru, ama sağlayıcıların bu alanı nasıl yazdığı
+     çeşitlilik gösteriyor.
 
 3. **Tarayıcı kapsamı** — Firefox/Edge uyarlaması (native messaging protokolü
    aynı, yalnızca manifest farklı) ve Chrome Web Store yayını. Ucuz kazanç:
