@@ -1,0 +1,1420 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Muiget — Açık kaynak indirme yöneticisi</title>
+    <meta
+      name="description"
+      content="Segmentli HTTP indirme, HLS/DASH video, kesintiden sonra kaldığı yerden devam, tarayıcı uzantısı. Apache 2.0, ücretsiz, telemetri yok."
+    />
+    <link rel="icon" type="image/png" href="ikon.png" />
+
+    <meta property="og:title" content="Muiget — Açık kaynak indirme yöneticisi" />
+    <meta
+      property="og:description"
+      content="Segmentli HTTP indirme, HLS/DASH video, kesintiden sonra kaldığı yerden devam, tarayıcı uzantısı. Apache 2.0, ücretsiz, telemetri yok."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="ekran-goruntusu.png" />
+    <meta name="theme-color" content="#0f1115" />
+
+    <style>
+      @font-face {
+        font-family: 'Outfit';
+        src: url('outfit-latin.woff2') format('woff2');
+        font-weight: 100 900;
+        font-display: swap;
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F, U+2122;
+      }
+      @font-face {
+        font-family: 'Outfit';
+        src: url('outfit-latin-ext.woff2') format('woff2');
+        font-weight: 100 900;
+        font-display: swap;
+        unicode-range: U+0100-02AF, U+1E00-1EFF, U+2020, U+20A0-20AB;
+      }
+
+      /* Uygulamanın kendi paletiyle aynı (bkz. src/styles.css, karar #10). */
+      :root {
+        --bg: #0f1115;
+        --bg-alt: #12151b;
+        --panel: #181b22;
+        --elevated: #1f232c;
+        --border: #262b35;
+        --border-soft: #1e222b;
+        --text: #e6e9ef;
+        --muted: #8b93a3;
+        --faint: #5f6878;
+        --accent: #2dd4bf;
+        --accent-strong: #5eead4;
+        --accent-dim: #16766b;
+        --on-accent: #04211d;
+        --warning: #f0b429;
+        --error: #f87171;
+        --radius: 14px;
+        --radius-lg: 20px;
+        --max: 1120px;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Outfit', 'Segoe UI', system-ui, -apple-system, sans-serif;
+        font-size: 17px;
+        line-height: 1.65;
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+
+      h1,
+      h2,
+      h3 {
+        line-height: 1.15;
+        letter-spacing: -0.02em;
+        margin: 0;
+      }
+
+      code {
+        font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+        font-size: 0.86em;
+        background: var(--elevated);
+        border: 1px solid var(--border-soft);
+        padding: 0.12em 0.42em;
+        border-radius: 6px;
+        color: var(--accent-strong);
+      }
+
+      .kapsam {
+        width: 100%;
+        max-width: var(--max);
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+
+      .bolum {
+        padding: 96px 0;
+        border-top: 1px solid var(--border-soft);
+      }
+
+      .bolum-basi {
+        max-width: 660px;
+        margin-bottom: 52px;
+      }
+
+      .bolum-basi h2 {
+        font-size: clamp(28px, 4vw, 38px);
+        font-weight: 600;
+      }
+
+      .bolum-alt {
+        color: var(--muted);
+        margin: 14px 0 0;
+        font-size: 17px;
+      }
+
+      .etiket {
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 14px;
+      }
+
+      /* ---------- Üst çubuk ---------- */
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background: rgb(15 17 21 / 78%);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border-bottom: 1px solid var(--border-soft);
+      }
+
+      .ust {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        height: 64px;
+      }
+
+      .marka {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--text);
+        text-decoration: none;
+        font-size: 16px;
+      }
+
+      .marka img {
+        width: 26px;
+        height: 26px;
+        border-radius: 7px;
+      }
+
+      .ust nav {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .ust nav a {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 15px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        /* Kırılırsa "Nasıl / çalışır" diye iki satır oluyor ve çubuk bozuluyor. */
+        white-space: nowrap;
+        transition: color 0.15s, background 0.15s;
+      }
+
+      .ust nav a:hover {
+        color: var(--text);
+        background: var(--panel);
+      }
+
+      .ust nav a.gh {
+        color: var(--text);
+        border: 1px solid var(--border);
+        margin-left: 8px;
+      }
+
+      /* ---------- Hero ---------- */
+      .hero {
+        position: relative;
+        padding: 110px 0 90px;
+        text-align: center;
+        overflow: hidden;
+      }
+
+      .hero::before {
+        content: '';
+        position: absolute;
+        top: -280px;
+        left: 50%;
+        width: 900px;
+        height: 620px;
+        transform: translateX(-50%);
+        background: radial-gradient(
+          ellipse at center,
+          rgb(45 212 191 / 15%) 0%,
+          rgb(45 212 191 / 5%) 38%,
+          transparent 68%
+        );
+        pointer-events: none;
+      }
+
+      .hero > * {
+        position: relative;
+      }
+
+      .rozet {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--accent-strong);
+        background: rgb(45 212 191 / 9%);
+        border: 1px solid rgb(45 212 191 / 24%);
+        padding: 6px 14px;
+        border-radius: 999px;
+        margin-bottom: 28px;
+      }
+
+      .rozet .nokta {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 3px rgb(45 212 191 / 18%);
+      }
+
+      .hero h1 {
+        font-size: clamp(38px, 6.6vw, 66px);
+        font-weight: 600;
+        max-width: 15ch;
+        margin: 0 auto;
+      }
+
+      .vurgu {
+        background: linear-gradient(100deg, var(--accent) 10%, var(--accent-strong) 90%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .alt-baslik {
+        color: var(--muted);
+        font-size: clamp(17px, 2.1vw, 20px);
+        max-width: 58ch;
+        margin: 24px auto 0;
+      }
+
+      .dugmeler {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: center;
+        margin-top: 38px;
+      }
+
+      .dugme {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 16px;
+        font-weight: 500;
+        padding: 13px 24px;
+        border-radius: 11px;
+        text-decoration: none;
+        border: 1px solid var(--border);
+        color: var(--text);
+        background: var(--panel);
+        transition: transform 0.15s, border-color 0.15s, background 0.15s;
+      }
+
+      .dugme:hover {
+        transform: translateY(-1px);
+        border-color: var(--faint);
+        background: var(--elevated);
+      }
+
+      .dugme svg {
+        width: 18px;
+        height: 18px;
+      }
+
+      .dugme.birincil {
+        background: linear-gradient(180deg, var(--accent-strong), var(--accent));
+        color: var(--on-accent);
+        border-color: transparent;
+        font-weight: 600;
+        box-shadow: 0 8px 26px -10px rgb(45 212 191 / 55%);
+      }
+
+      .dugme.birincil:hover {
+        background: linear-gradient(180deg, #7cf0dd, var(--accent-strong));
+      }
+
+      .guven {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px 22px;
+        margin-top: 30px;
+        color: var(--faint);
+        font-size: 14px;
+      }
+
+      .guven span {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .guven svg {
+        width: 14px;
+        height: 14px;
+        color: var(--accent-dim);
+      }
+
+      /* ---------- Ekran görüntüsü ---------- */
+      .vitrin {
+        margin: 76px auto 0;
+        max-width: 980px;
+        padding: 0 24px;
+      }
+
+      .pencere {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        background: var(--panel);
+        box-shadow: 0 40px 80px -30px rgb(0 0 0 / 70%), 0 0 0 1px rgb(255 255 255 / 3%);
+      }
+
+      .pencere-cubugu {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 11px 15px;
+        background: var(--elevated);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .pencere-cubugu i {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: var(--border);
+      }
+
+      .pencere-cubugu b {
+        margin-left: 10px;
+        font-size: 12.5px;
+        font-weight: 500;
+        color: var(--faint);
+        letter-spacing: 0.04em;
+      }
+
+      .pencere img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      /* ---------- Segment diyagramı ---------- */
+      .nasil {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 56px;
+        align-items: center;
+      }
+
+      .diyagram {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 30px 28px;
+      }
+
+      .diyagram svg {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+
+      .seg-bar {
+        animation: doldur 2.6s ease-out infinite;
+        transform-origin: left center;
+      }
+
+      .seg-bar:nth-of-type(2) { animation-delay: 0.18s; }
+      .seg-bar:nth-of-type(3) { animation-delay: 0.06s; }
+      .seg-bar:nth-of-type(4) { animation-delay: 0.3s; }
+      .seg-bar:nth-of-type(5) { animation-delay: 0.12s; }
+      .seg-bar:nth-of-type(6) { animation-delay: 0.24s; }
+      .seg-bar:nth-of-type(7) { animation-delay: 0.02s; }
+      .seg-bar:nth-of-type(8) { animation-delay: 0.36s; }
+
+      @keyframes doldur {
+        0% { transform: scaleX(0.04); opacity: 0.55; }
+        70% { transform: scaleX(1); opacity: 1; }
+        100% { transform: scaleX(1); opacity: 1; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .seg-bar {
+          animation: none;
+        }
+        html {
+          scroll-behavior: auto;
+        }
+      }
+
+      .adimlar {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 22px;
+      }
+
+      .adim {
+        display: grid;
+        grid-template-columns: 30px 1fr;
+        gap: 15px;
+        align-items: start;
+      }
+
+      .adim b {
+        width: 30px;
+        height: 30px;
+        display: grid;
+        place-items: center;
+        border-radius: 9px;
+        background: rgb(45 212 191 / 10%);
+        border: 1px solid rgb(45 212 191 / 22%);
+        color: var(--accent-strong);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .adim h3 {
+        font-size: 17px;
+        font-weight: 600;
+        margin-bottom: 3px;
+      }
+
+      .adim p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15.5px;
+        line-height: 1.6;
+      }
+
+      /* ---------- Kart ızgarası ---------- */
+      .izgara {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+        gap: 18px;
+      }
+
+      .kart {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 26px 24px;
+        transition: border-color 0.18s, transform 0.18s;
+      }
+
+      .kart:hover {
+        border-color: var(--accent-dim);
+        transform: translateY(-2px);
+      }
+
+      .kart h3 {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        font-size: 17.5px;
+        font-weight: 600;
+        margin-bottom: 11px;
+      }
+
+      .kart h3 svg {
+        width: 19px;
+        height: 19px;
+        color: var(--accent);
+        flex: 0 0 auto;
+      }
+
+      .kart p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15.5px;
+        line-height: 1.62;
+      }
+
+      .kart .yeni {
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--on-accent);
+        background: var(--accent);
+        padding: 2px 7px;
+        border-radius: 5px;
+        margin-left: auto;
+      }
+
+      /* ---------- Karşılaştırma ---------- */
+      .tablo-sar {
+        overflow-x: auto;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--panel);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 560px;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 15px 20px;
+        border-bottom: 1px solid var(--border-soft);
+        font-size: 15.5px;
+      }
+
+      thead th {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--faint);
+        background: var(--elevated);
+      }
+
+      thead th:not(:first-child) {
+        text-align: center;
+        width: 130px;
+      }
+
+      tbody td:not(:first-child) {
+        text-align: center;
+      }
+
+      tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      td.var {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      td.yok {
+        color: var(--faint);
+      }
+
+      td.kismi {
+        color: var(--warning);
+      }
+
+      /* ---------- Sınır ---------- */
+      .sinir {
+        background: var(--bg-alt);
+      }
+
+      .sinir ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        gap: 14px;
+      }
+
+      .sinir li {
+        display: grid;
+        grid-template-columns: 22px 1fr;
+        gap: 14px;
+        align-items: start;
+        color: var(--muted);
+        font-size: 16px;
+      }
+
+      .sinir li svg {
+        width: 18px;
+        height: 18px;
+        margin-top: 4px;
+        color: var(--error);
+      }
+
+      .sinir li.uyari svg {
+        color: var(--warning);
+      }
+
+      .sinir li strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .kapanis {
+        margin: 34px 0 0;
+        padding: 20px 22px;
+        border-left: 2px solid var(--accent-dim);
+        background: var(--panel);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        color: var(--muted);
+        font-size: 15.5px;
+      }
+
+      /* ---------- Rakamlar ---------- */
+      .rakamlar {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 18px;
+      }
+
+      .rakam {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 26px 22px;
+        text-align: center;
+      }
+
+      .rakam b {
+        display: block;
+        font-size: 34px;
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        color: var(--accent-strong);
+      }
+
+      .rakam span {
+        display: block;
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 14.5px;
+      }
+
+      /* ---------- Kurulum ---------- */
+      .platformlar {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 16px;
+        margin-bottom: 34px;
+      }
+
+      .platform {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 22px;
+      }
+
+      .platform h3 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 12px;
+      }
+
+      .platform h3 svg {
+        width: 17px;
+        height: 17px;
+        color: var(--accent);
+      }
+
+      .platform ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 7px;
+      }
+
+      .platform li {
+        color: var(--muted);
+        font-size: 14.5px;
+      }
+
+      .platform .not {
+        margin-top: 12px;
+        font-size: 13px;
+        color: var(--warning);
+        line-height: 1.5;
+      }
+
+      pre {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 22px 24px;
+        overflow-x: auto;
+        margin: 0;
+        font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+        font-size: 14px;
+        line-height: 1.75;
+        color: var(--text);
+      }
+
+      pre .yorum {
+        color: var(--faint);
+      }
+
+      /* ---------- Alt bilgi ---------- */
+      footer {
+        border-top: 1px solid var(--border-soft);
+        padding: 40px 0;
+        background: var(--bg-alt);
+      }
+
+      .alt-icerik {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--faint);
+        font-size: 14.5px;
+      }
+
+      footer nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+      }
+
+      footer nav a {
+        color: var(--muted);
+        text-decoration: none;
+      }
+
+      footer nav a:hover {
+        color: var(--accent);
+      }
+
+      /* ---------- Duyarlı ---------- */
+      @media (max-width: 900px) {
+        .nasil {
+          grid-template-columns: 1fr;
+          gap: 40px;
+        }
+      }
+
+      /* Altı bağlantı 900px'in altında çubuğa sığmıyor; sıkıştırmak yerine
+         gizleniyor — bölümler zaten sayfayı aşağı kaydırınca sırayla geliyor. */
+      @media (max-width: 900px) {
+        .ust nav a:not(.gh) {
+          display: none;
+        }
+      }
+
+      @media (max-width: 620px) {
+        body {
+          font-size: 16px;
+        }
+        .bolum {
+          padding: 68px 0;
+        }
+        .hero {
+          padding: 76px 0 64px;
+        }
+        .vitrin {
+          margin-top: 52px;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <header>
+      <div class="kapsam ust">
+        <a class="marka" href="#">
+          <img src="ikon.png" alt="" />
+          Muiget
+        </a>
+        <nav>
+          <a href="#nasil">Nasıl çalışır</a>
+          <a href="#ozellikler">Özellikler</a>
+          <a href="#karsilastirma">IDM ile</a>
+          <a href="#sinir">Ne yapmaz</a>
+          <a href="#kurulum">Kurulum</a>
+          <a class="gh" href="https://github.com/heraklessii/Muiget">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <!-- ================= HERO ================= -->
+      <section class="hero">
+        <div class="kapsam">
+          <span class="rozet"><i class="nokta"></i> v0.1.5 · ön sürüm</span>
+
+          <h1>İndirme yöneticisi, <span class="vurgu">lisans anahtarı olmadan.</span></h1>
+
+          <p class="alt-baslik">
+            Dosyayı parçalara bölüp paralel indirir, bağlantı koparsa kaldığı yerden
+            devam eder, sayfadaki video akışını tek dosyada birleştirir. Açık kaynak,
+            ücretsiz, telemetrisiz.
+          </p>
+
+          <div class="dugmeler">
+            <a class="dugme birincil" href="https://github.com/heraklessii/Muiget/releases/latest">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 3v12" /><path d="m7 11 5 5 5-5" /><path d="M4 20h16" />
+              </svg>
+              Windows için indir
+            </a>
+            <a class="dugme" href="#kurulum">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 17V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10" /><path d="M2 21h20" />
+              </svg>
+              Linux &amp; macOS
+            </a>
+            <a class="dugme" href="https://github.com/heraklessii/Muiget">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.36 1.09 2.94.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.93.36.31.68.92.68 1.86v2.75c0 .27.18.58.69.48A10 10 0 0 0 12 2Z" />
+              </svg>
+              Kaynak kodu
+            </a>
+          </div>
+
+          <div class="guven">
+            <span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7" /></svg>
+              Apache 2.0
+            </span>
+            <span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7" /></svg>
+              Telemetri yok
+            </span>
+            <span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7" /></svg>
+              3,9 MB kurulum
+            </span>
+            <span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7" /></svg>
+              Reklam yok
+            </span>
+          </div>
+        </div>
+
+        <div class="vitrin">
+          <div class="pencere">
+            <div class="pencere-cubugu">
+              <i></i><i></i><i></i>
+              <b>Muiget</b>
+            </div>
+            <img src="ekran-goruntusu.png" alt="Muiget uygulamasının indirme listesi ekranı"
+              width="1268" height="897" />
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= NASIL ÇALIŞIR ================= -->
+      <section id="nasil" class="bolum">
+        <div class="kapsam">
+          <div class="bolum-basi">
+            <span class="etiket">Nasıl çalışır</span>
+            <h2>Tek bağlantı yerine sekiz bağlantı.</h2>
+            <p class="bolum-alt">
+              Sunucu <code>Range</code> isteklerini destekliyorsa dosya sekiz parçaya
+              bölünüp hepsi aynı anda indirilir. Bu, sunucudan izin almadan yapılan bir
+              şey değil — HTTP'nin kendi özelliği.
+            </p>
+          </div>
+
+          <div class="nasil">
+            <div class="diyagram">
+              <svg viewBox="0 0 400 210" role="img"
+                aria-label="Bir dosyanın sekiz parçaya bölünüp paralel indirilmesi">
+                <text x="0" y="12" fill="#8b93a3" font-size="11" font-family="inherit">
+                  dosya.iso · 4,2 GB
+                </text>
+
+                <rect x="0" y="22" width="400" height="16" rx="4" fill="#1f232c" />
+
+                <g>
+                  <rect class="seg-bar" x="0" y="22" width="48" height="16" rx="4" fill="#2dd4bf" opacity="0.9" />
+                  <rect class="seg-bar" x="50" y="22" width="48" height="16" rx="4" fill="#2dd4bf" opacity="0.9" />
+                  <rect class="seg-bar" x="100" y="22" width="48" height="16" rx="4" fill="#2dd4bf" opacity="0.9" />
+                  <rect class="seg-bar" x="150" y="22" width="48" height="16" rx="4" fill="#2dd4bf" opacity="0.9" />
+                  <rect class="seg-bar" x="200" y="22" width="48" height="16" rx="4" fill="#2dd4bf" opacity="0.9" />
+                  <rect class="seg-bar" x="250" y="22" width="48" height="16" rx="4" fill="#2dd4bf" opacity="0.9" />
+                  <rect class="seg-bar" x="300" y="22" width="48" height="16" rx="4" fill="#2dd4bf" opacity="0.9" />
+                  <rect class="seg-bar" x="350" y="22" width="50" height="16" rx="4" fill="#2dd4bf" opacity="0.9" />
+                </g>
+
+                <g stroke="#262b35" stroke-width="1">
+                  <line x1="25" y1="46" x2="25" y2="62" />
+                  <line x1="75" y1="46" x2="75" y2="62" />
+                  <line x1="125" y1="46" x2="125" y2="62" />
+                  <line x1="175" y1="46" x2="175" y2="62" />
+                  <line x1="225" y1="46" x2="225" y2="62" />
+                  <line x1="275" y1="46" x2="275" y2="62" />
+                  <line x1="325" y1="46" x2="325" y2="62" />
+                  <line x1="375" y1="46" x2="375" y2="62" />
+                </g>
+
+                <g font-size="9" fill="#5f6878" font-family="inherit" text-anchor="middle">
+                  <text x="25" y="76">#1</text>
+                  <text x="75" y="76">#2</text>
+                  <text x="125" y="76">#3</text>
+                  <text x="175" y="76">#4</text>
+                  <text x="225" y="76">#5</text>
+                  <text x="275" y="76">#6</text>
+                  <text x="325" y="76">#7</text>
+                  <text x="375" y="76">#8</text>
+                </g>
+
+                <text x="0" y="106" fill="#8b93a3" font-size="11" font-family="inherit">
+                  8 paralel Range isteği
+                </text>
+
+                <rect x="0" y="118" width="400" height="1" fill="#262b35" />
+
+                <text x="0" y="140" fill="#8b93a3" font-size="11" font-family="inherit">
+                  Diskteki hedef dosya · seek + write
+                </text>
+
+                <rect x="0" y="150" width="400" height="30" rx="6" fill="#181b22" stroke="#262b35" />
+                <g fill="#2dd4bf" opacity="0.75">
+                  <rect x="6" y="156" width="42" height="18" rx="3" />
+                  <rect x="56" y="156" width="42" height="18" rx="3" />
+                  <rect x="106" y="156" width="42" height="18" rx="3" />
+                  <rect x="156" y="156" width="42" height="18" rx="3" />
+                  <rect x="206" y="156" width="42" height="18" rx="3" />
+                  <rect x="256" y="156" width="42" height="18" rx="3" />
+                  <rect x="306" y="156" width="42" height="18" rx="3" />
+                  <rect x="356" y="156" width="38" height="18" rx="3" />
+                </g>
+
+                <text x="0" y="200" fill="#5f6878" font-size="10" font-family="inherit">
+                  Birleştirme adımı yok — her parça kendi offsetine yazıyor.
+                </text>
+              </svg>
+            </div>
+
+            <ol class="adimlar">
+              <li class="adim">
+                <b>1</b>
+                <div>
+                  <h3>Sunucu yoklanır</h3>
+                  <p>
+                    Bir HEAD isteğiyle <code>Accept-Ranges</code> ve dosya boyutu
+                    okunur. Sunucu parçalı indirmeyi desteklemiyorsa tek bağlantıya
+                    düşülür — zorlama yok.
+                  </p>
+                </div>
+              </li>
+              <li class="adim">
+                <b>2</b>
+                <div>
+                  <h3>Dosya bölünür</h3>
+                  <p>
+                    Hedef dosya baştan tam boyutunda ayrılır, her parça kendi byte
+                    aralığını doğrudan kendi offsetine yazar. Geçici parça dosyası ve
+                    sonda birleştirme beklemesi yok.
+                  </p>
+                </div>
+              </li>
+              <li class="adim">
+                <b>3</b>
+                <div>
+                  <h3>Yavaş parça devralınır</h3>
+                  <p>
+                    Bir parça erken biterse en yavaş parçanın kalanı ikiye bölünüp boşta
+                    kalan bağlantıya verilir. Sondaki "tek parça bekliyor" kuyruğu
+                    böylece oluşmuyor.
+                  </p>
+                </div>
+              </li>
+              <li class="adim">
+                <b>4</b>
+                <div>
+                  <h3>Durum dosyanın yanında durur</h3>
+                  <p>
+                    İlerleme <code>.muiget</code> dosyasına yazılır. Uygulama çökse,
+                    bilgisayar kapansa bile indirme kaldığı yerden sürer; liste açılışta
+                    diskten geri gelir.
+                  </p>
+                </div>
+              </li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= ÖZELLİKLER ================= -->
+      <section id="ozellikler" class="bolum">
+        <div class="kapsam">
+          <div class="bolum-basi">
+            <span class="etiket">Özellikler</span>
+            <h2>Bir indirme yöneticisinden beklenenler.</h2>
+            <p class="bolum-alt">Fazlası değil, eksiği de değil.</p>
+          </div>
+
+          <div class="izgara">
+            <div class="kart">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+                Çoklu bağlantı
+              </h3>
+              <p>
+                HTTP Range istekleriyle sekiz paralel parça. Aynı siteden birden çok
+                indirme varsa bağlantı kotası aralarında adil bölüşülür — hiçbiri sıfır
+                byte'ta beklemez.
+              </p>
+            </div>
+
+            <div class="kart">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="14" height="14" rx="2" /><path d="m16 10 6-3v10l-6-3z" /></svg>
+                Video akışı
+                <span class="yeni">Yeni</span>
+              </h3>
+              <p>
+                Oynatıcı videoyu yüzlerce parça hâlinde alıyorsa (<code>.m3u8</code>,
+                <code>.mpd</code>) parçalar paralel inip tek dosyada birleşir. Kalite ve
+                ses dili önceden seçilir, indirme duraklatılıp sürdürülebilir.
+              </p>
+            </div>
+
+            <div class="kart">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M6 15h5M14 15h4" /></svg>
+                Altyazı
+                <span class="yeni">Yeni</span>
+              </h3>
+              <p>
+                Yayında altyazı varsa videonun yanına <code>film.tr.vtt</code> olarak
+                iner. Parçalar uç uca eklenmez, zaman ekseni hizalanarak birleştirilir —
+                yoksa çoğu oynatıcı dosyayı hiç açmaz. Altyazının inmemesi videoyu
+                düşürmez.
+              </p>
+            </div>
+
+            <div class="kart">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+                Ses çıkarma
+                <span class="yeni">Yeni</span>
+              </h3>
+              <p>
+                Videodan sesi kayıpsız çıkarır (<code>.m4a</code>/<code>.opus</code>) —
+                yeniden kodlama yok, saniyeler sürer. MP3 isteyen ayrıca seçebilir.
+                Harici siteye gitmeye gerek kalmıyor.
+              </p>
+            </div>
+
+            <div class="kart">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>
+                Kesintiye dayanıklı
+              </h3>
+              <p>
+                Uygulama kapansa, bilgisayar çökse bile indirme kaldığı yerden devam
+                eder. Yarım indirmeler açılışta listeye geri gelir — ayrı bir veritabanı
+                yok, durum dosyanın yanında.
+              </p>
+            </div>
+
+            <div class="kart">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18" /></svg>
+                Tarayıcı entegrasyonu
+              </h3>
+              <p>
+                Chrome, Edge ve Firefox uzantısıyla sağ tık → "Muiget ile indir", sayfadaki bağlantıları
+                ve videoları tarama, isteğe bağlı olarak tarayıcı indirmelerini
+                devralma.
+              </p>
+            </div>
+
+            <div class="kart">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-6M10 18V6M16 18v-9M22 18v-4" /></svg>
+                Hız yönetimi
+              </h3>
+              <p>
+                Bant genişliği sınırı ve saat bazlı kurallar: gece sınırsız, gündüz
+                2 MB/s. Eşzamanlı indirme sayısı ve sunucu başına bağlantı kotası
+                ayarlanabilir.
+              </p>
+            </div>
+
+            <div class="kart">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.4 8.4 8 9 4.6-.6 8-4 8-9V6z" /><path d="m9 12 2 2 4-4" /></svg>
+                Telemetri yok
+              </h3>
+              <p>
+                Hiçbir veri toplanmaz. Uygulamanın kendiliğinden yaptığı tek dış istek
+                sürüm kontrolü — o da kapatılabiliyor. Kodun tamamı okunabilir.
+              </p>
+            </div>
+
+            <div class="kart">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.4 8.4 8 9 4.6-.6 8-4 8-9V6z" /></svg>
+                Doğrulama ve düzen
+              </h3>
+              <p>
+                İndirilen dosyanın SHA-256/MD5 özeti hesaplanır, kopya indirme uyarısı
+                verilir, dosyalar isteğe bağlı olarak türüne göre klasörlere ayrılır.
+              </p>
+            </div>
+
+            <div class="kart">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 7l9 4 9-4-9-4z" /><path d="m3 12 9 4 9-4M3 17l9 4 9-4" /></svg>
+                Küçük
+              </h3>
+              <p>
+                Tauri v2 + Rust. Kurulum paketi 3,9 MB, kurulu uygulama 14 MB. Electron
+                tabanlı bir alternatif tipik olarak bunun on katından fazlasını kaplar.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= KARŞILAŞTIRMA ================= -->
+      <section id="karsilastirma" class="bolum">
+        <div class="kapsam">
+          <div class="bolum-basi">
+            <span class="etiket">Karşılaştırma</span>
+            <h2>IDM ile arayı kapatmak.</h2>
+            <p class="bolum-alt">
+              Muiget'in ölçütü bu: bir özelliğin "IDM'de var mı" sorusu, iç güzellikten
+              önce geliyor. Aşağısı bugünün durumu — pazarlama değil.
+            </p>
+          </div>
+
+          <div class="tablo-sar">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Özellik</th>
+                  <th scope="col">Muiget</th>
+                  <th scope="col">IDM</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Segmentli paralel indirme</td>
+                  <td class="var">Var</td>
+                  <td class="var">Var</td>
+                </tr>
+                <tr>
+                  <td>Kaldığı yerden devam</td>
+                  <td class="var">Var</td>
+                  <td class="var">Var</td>
+                </tr>
+                <tr>
+                  <td>Tarayıcı entegrasyonu</td>
+                  <td class="var">Chrome, Edge, Firefox</td>
+                  <td class="var">Chrome, Firefox, Edge</td>
+                </tr>
+                <tr>
+                  <td>HLS/DASH video indirme</td>
+                  <td class="var">Var</td>
+                  <td class="var">Var</td>
+                </tr>
+                <tr>
+                  <td>Altyazı indirme</td>
+                  <td class="var">Var</td>
+                  <td class="var">Var</td>
+                </tr>
+                <tr>
+                  <td>Ses çıkarma (m4a / MP3)</td>
+                  <td class="var">Var</td>
+                  <td class="kismi">Kısmi</td>
+                </tr>
+                <tr>
+                  <td>Windows dışı platformlar</td>
+                  <td class="var">Linux, macOS</td>
+                  <td class="yok">Yok</td>
+                </tr>
+                <tr>
+                  <td>Fiyat</td>
+                  <td class="var">Ücretsiz</td>
+                  <td class="yok">Lisanslı</td>
+                </tr>
+                <tr>
+                  <td>Kaynak kodu</td>
+                  <td class="var">Apache 2.0</td>
+                  <td class="yok">Kapalı</td>
+                </tr>
+                <tr>
+                  <td>Torrent</td>
+                  <td class="yok">Henüz yok</td>
+                  <td class="yok">Yok</td>
+                </tr>
+                <tr>
+                  <td>Sahada olgunluk</td>
+                  <td class="kismi">Ön sürüm</td>
+                  <td class="var">20+ yıl</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SINIR ================= -->
+      <section id="sinir" class="bolum sinir">
+        <div class="kapsam">
+          <div class="bolum-basi">
+            <span class="etiket">Sınır</span>
+            <h2>Ne yapmaz.</h2>
+            <p class="bolum-alt">Bu net bir sınırdır ve değişmeyecektir.</p>
+          </div>
+
+          <ul>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              <span>
+                Sitelerin indirme <strong>limitlerini, kotalarını veya hız sınırlarını
+                aşmaz.</strong>
+              </span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              <span>
+                Rapidgator, Mega gibi <strong>premium link servislerinin kısıtlarını
+                atlatmaz.</strong>
+              </span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              <span>
+                <strong>DRM korumalı video indirmez.</strong> HLS'in
+                <code>AES-128</code> parça şifrelemesi destekleniyor — anahtar
+                manifestin gösterdiği adresten herkese açık veriliyor ve tarayıcıdaki
+                oynatıcı da aynısını yapıyor. Buna karşılık <code>SAMPLE-AES</code>
+                (FairPlay), Widevine ve PlayReady korumalı içerik açıkça reddedilir.
+              </span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              <span><strong>Canlı yayın kaydetmez.</strong></span>
+            </li>
+            <li class="uyari">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v5" /><path d="M12 17.5v.5" /><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></svg>
+              <span>
+                <strong>Bazı siteler indirmeyi kullanım şartlarında yasaklıyor</strong>
+                — YouTube başta. Muiget burada teknik bir koruma aşmıyor: imzalı adresi
+                tarayıcının kendisi üretip zaten istiyor, uzantı yalnızca o adresi
+                görüyor. Şifre çözme, imza kırma yok. Ama indirmenin kendisi o sitelerin
+                şartlarına aykırı olabilir ve <strong>sorumluluk kullanıcıda.</strong>
+                Bu yakalama ayrı bir izin arkasında ve varsayılan kapalı.
+              </span>
+            </li>
+          </ul>
+
+          <p class="kapanis">
+            Buradaki "hızlı indirme" yalnızca meşru HTTP seviyesinde optimizasyon
+            demektir: paralel Range istekleri, kaldığı yerden devam, bant genişliği
+            yönetimi. Sunucu ne veriyorsa o indirilir. Şifreleme kırmayı, kota aşmayı
+            ya da ödeme duvarı atlatmayı hedefleyen özellik talepleri kabul edilmez.
+          </p>
+        </div>
+      </section>
+
+      <!-- ================= DURUM ================= -->
+      <section class="bolum">
+        <div class="kapsam">
+          <div class="bolum-basi">
+            <span class="etiket">Durum</span>
+            <h2>Proje erken aşamada.</h2>
+            <p class="bolum-alt">
+              Aşağıdakiler ölçülmüş rakamlar, tahmin değil. İndirme motoru, video akışı,
+              arayüz ve tarayıcı uzantısı çalışıyor; torrent desteği henüz yok ve uygulama
+              geniş çapta sahada denenmedi.
+            </p>
+          </div>
+
+          <div class="rakamlar">
+            <div class="rakam"><b>341</b><span>otomatik test</span></div>
+            <div class="rakam"><b>3,9 MB</b><span>kurulum paketi</span></div>
+            <div class="rakam"><b>8</b><span>varsayılan paralel parça</span></div>
+            <div class="rakam"><b>0</b><span>toplanan veri</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= KURULUM ================= -->
+      <section id="kurulum" class="bolum">
+        <div class="kapsam">
+          <div class="bolum-basi">
+            <span class="etiket">Kurulum</span>
+            <h2>Üç platform.</h2>
+            <p class="bolum-alt">
+              Paketler
+              <a href="https://github.com/heraklessii/Muiget/releases/latest">sürümler
+              sayfasında</a>. Hepsi imzasız: Windows SmartScreen ve macOS Gatekeeper
+              uyarı gösterecek — kod imzalama sertifikası henüz yok.
+            </p>
+          </div>
+
+          <div class="platformlar">
+            <div class="platform">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10 4.6v6.9H3zM11 4.4 21 3v8.5H11zM3 12.5h7v6.9L3 18.5zM11 12.5h10V21l-10-1.4z" /></svg>
+                Windows
+              </h3>
+              <ul>
+                <li><code>.exe</code> — NSIS kurulumu (önerilen)</li>
+                <li><code>.msi</code> — kurumsal dağıtım</li>
+              </ul>
+            </div>
+
+            <div class="platform">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"><path d="M12 2c2.5 0 3 2.5 3 5 0 2 1.5 3.5 2.5 5.5S19 17 17 19c-1.5 1.5-3 2-5 2s-3.5-.5-5-2c-2-2-1.5-4.5-.5-6.5S9 9 9 7c0-2.5.5-5 3-5Z" /></svg>
+                Linux
+              </h3>
+              <ul>
+                <li><code>.AppImage</code> — kurulum gerektirmez</li>
+                <li><code>.deb</code> — Debian / Ubuntu</li>
+                <li><code>.rpm</code> — Fedora / openSUSE</li>
+              </ul>
+              <p class="not">Derleniyor ama geliştirici tarafından denenmedi.</p>
+            </div>
+
+            <div class="platform">
+              <h3>
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.9c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9s-1.8-.9-3-.8c-1.5 0-2.9.9-3.7 2.3-1.6 2.7-.4 6.8 1.1 9 .8 1.1 1.7 2.3 2.9 2.2 1.2 0 1.6-.7 3-.7s1.8.7 3 .7 2-1.1 2.8-2.2c.9-1.2 1.2-2.4 1.2-2.5 0 0-2.4-.9-2.4-3.6ZM14.2 5.9c.6-.8 1-1.9.9-3-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.8-.9 2.9 1 0 2-.5 2.7-1.3Z" /></svg>
+                macOS
+              </h3>
+              <ul>
+                <li><code>.dmg</code> — universal</li>
+                <li>Apple Silicon + Intel</li>
+              </ul>
+              <p class="not">Derleniyor ama geliştirici tarafından denenmedi.</p>
+            </div>
+          </div>
+
+          <pre><span class="yorum"># Kaynaktan derlemek — Rust 1.77+ ve Node.js 20+ gerekiyor</span>
+git clone https://github.com/heraklessii/Muiget.git
+cd Muiget
+npm install
+npm run tauri dev    <span class="yorum"># geliştirme modu</span>
+npm run tauri build  <span class="yorum"># kurulum paketi üretir</span></pre>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="kapsam alt-icerik">
+        <span>Apache License 2.0 · Muiget Contributors</span>
+        <nav>
+          <a href="https://github.com/heraklessii/Muiget">GitHub</a>
+          <a href="https://github.com/heraklessii/Muiget/releases">Sürümler</a>
+          <a href="https://github.com/heraklessii/Muiget/blob/main/docs/decisions.md">Mimari kararlar</a>
+          <a href="https://github.com/heraklessii/Muiget/blob/main/extension/README.md">Uzantı</a>
+          <a href="https://github.com/heraklessii/Muiget/issues">Sorun bildir</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
