@@ -221,6 +221,7 @@ Detaylar için `docs/decisions.md`. Kısa özet:
     derlemesinde kapalı — mağaza politikası YouTube indirmeyi yasaklıyor.
     İmza çözülmüyor; tarayıcının zaten istediği adres görülüyor. Sessiz video
     akışları popup'ta işaretleniyor (karar #27).
+    **Bu kararın dayanağı çöktü** — YouTube SABR'a geçti, bkz. madde 22.
 17. **Ses indirme**: varsayılan `-vn -c:a copy` ile kayıpsız çıkarma
     (`.m4a`/`.opus`); MP3 isteğe bağlı ve yeniden kodluyor. Çıktı uzantısı
     `codecs` alanından türetiliyor (karar #28).
@@ -244,6 +245,13 @@ Detaylar için `docs/decisions.md`. Kısa özet:
     paketi). Kapsam dağıtılan ağaç — test bağımlılıkları hariç, derleme
     bağımlılıkları dahil. İzin verici olmayan lisanslar (5 MPL-2.0 + 1
     CDLA) ayrı bölümde. Tazeliği CI kontrol ediyor (karar #32).
+22. **YouTube SABR indirilemiyor, dürüstçe reddediliyor**: adres artık hangi
+    akışı istediğini taşımıyor (`itag`/`mime` yok, `sabr=1` var); düz `GET`
+    200 dönüyor ama gövde medya değil (`application/vnd.yt-ump`). Motor bunu
+    **sessizce çöp dosya** olarak yazıp "tamamlandı" diyordu. İki katmanlı
+    ret: adres seviyesinde (istek atılmadan) ve içerik türü seviyesinde.
+    Uzantıda indir düğmesi gösterilmiyor. SABR protokolünün uygulanması
+    yapılmadı — kapsam kararı İlker'in (karar #33).
 
 ## Çalışma Tarzı Notları
 
@@ -264,14 +272,14 @@ Detaylar için `docs/decisions.md`. Kısa özet:
 
 > **1.0 hazır değil.** 15. oturumda soruldu ve hayır çıktı; sebepler
 > `docs/tasks.md` → "1.0 Kapıları" başlığında K1–K6 olarak duruyor. Kod
-> sağlıklı (332 test, 0 uyarı); eksik olan **kanıt** — motor yalnızca yerel
+> sağlıklı (349 test, 0 uyarı); eksik olan **kanıt** — motor yalnızca yerel
 > test sunucusuna karşı doğrulandı, uzantı hiçbir tarayıcıya yüklenmedi, Faz 6
 > gerçek bir sağlayıcıya karşı hiç çalışmadı. K1 (`NOTICE`) kapandı; kalan beşi
 > kod değil deneme işi. Hepsi kapanana kadar sürüm 0.x devam ediyor.
 
 **Faz 0, 1, 2, 3, 5 ve Faz 6'nın çekirdeği tamamlandı.** Çalışan bir segmentli
 indirme motoru, **HLS/DASH video indirme**, tam bir arayüz ve **Chrome/Edge +
-Firefox** uzantısı var. 332 test geçiyor. Uygulama gerçek penceresinde uçtan
+Firefox** uzantısı var. 349 test geçiyor. Uygulama gerçek penceresinde uçtan
 uca doğrulandı (8 MB dosya, 8 paralel segment, SHA-256 birebir aynı) ve
 10. oturumda akış indirmesi de aynı yöntemle doğrulandı (yerel VOD playlisti,
 parçalar paralel indi, SHA-256 birebir). Chrome köprüsü de Chrome'un gerçek

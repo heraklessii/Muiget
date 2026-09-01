@@ -153,6 +153,80 @@ pub async fn probe_with(
         return Err(DownloadError::InvalidUrl(url.to_string()));
     }
 
+    sabr_adresi_mi(url)?;
+    let caps = yetenekleri_ogren(client, url, headers).await?;
+    medya_yaniti_mi(&caps)?;
+    Ok(caps)
+}
+
+/// YouTube'un SABR adresleri indirilemez — istek atmadan reddediliyor.
+///
+/// Karar #27 şu varsayıma dayanıyordu: "tarayıcı bu adresi zaten istedi, biz
+/// yalnızca görüyoruz." YouTube 2025-2026'da SABR'a geçince varsayım
+/// çöktü. Adres artık hangi akışı istediğini **taşımıyor**: `itag` ve `mime`
+/// alanları yok, yerine `sabr=1` var ve gerçek istek POST gövdesindeki
+/// protobuf yapılandırmasıyla anlatılıyor. Aynı adrese düz `GET` atınca
+/// sunucu 200 dönüyor ama gövdede medya değil `sabr.malformed_config` hatası
+/// oluyor (karar #33'te ölçüm var).
+///
+/// İstek atmadan reddetmenin sebebi mesajın niteliği: yanıta bakarak da
+/// anlaşılıyor ([`medya_yaniti_mi`]) ama orada yalnızca "medya değil"
+/// denebiliyor; burada sebebi adından belli.
+fn sabr_adresi_mi(url: &str) -> Result<()> {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return Ok(()); // Bozuk adresi burada değil, istek atarken raporla.
+    };
+
+    let googlevideo = parsed
+        .host_str()
+        .is_some_and(|h| h == "googlevideo.com" || h.ends_with(".googlevideo.com"));
+
+    let sabr = parsed.query_pairs().any(|(ad, deger)| ad == "sabr" && deger == "1");
+
+    if googlevideo && sabr {
+        return Err(DownloadError::UnsupportedStream(
+            "YouTube bu videoyu SABR ile veriyor: adres tek başına hangi akışı \
+             istediğini taşımıyor, medya ancak POST gövdesiyle isteniyor. \
+             Muiget bu akışı indiremiyor — indirilse oynatılamayan bir dosya \
+             çıkardı."
+                .to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Yanıt gerçekten medya mı, yoksa sunucunun kendi kontrol akışı mı?
+///
+/// SABR yanıtı `application/vnd.yt-ump` içerik türüyle ve **200** ile geliyor;
+/// `Content-Length` de `Accept-Ranges` de yok. Motor bunu tek bağlantılı,
+/// boyutu bilinmeyen normal bir indirme sanıyor, birkaç yüz byte'lık hata
+/// gövdesini dosya diye yazıyor ve **başarıyla bitti** diyordu. Kullanıcının
+/// gördüğü buydu: "çalışmıyor" ama hata da yok.
+fn medya_yaniti_mi(caps: &ServerCapabilities) -> Result<()> {
+    const UMP: &str = "application/vnd.yt-ump";
+
+    let ump = caps
+        .content_type
+        .as_deref()
+        .is_some_and(|t| t.trim().to_ascii_lowercase().starts_with(UMP));
+
+    if ump {
+        return Err(DownloadError::UnsupportedStream(
+            "Sunucu medya değil, YouTube'un UMP kontrol akışını döndürdü \
+             (application/vnd.yt-ump). Bu adres düz indirmeyle alınamıyor."
+                .to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+async fn yetenekleri_ogren(
+    client: &Client,
+    url: &str,
+    headers: &[(String, String)],
+) -> Result<ServerCapabilities> {
     let mut head_istegi = client.head(url);
     for (ad, deger) in headers {
         head_istegi = head_istegi.header(ad, deger);
@@ -404,6 +478,63 @@ pub fn sanitize_file_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Yalnızca test için yetenek nesnesi.
+    fn caps_ile_tur(tur: Option<&str>) -> ServerCapabilities {
+        ServerCapabilities {
+            final_url: "https://ornek/dosya".into(),
+            supports_ranges: false,
+            content_length: None,
+            etag: None,
+            last_modified: None,
+            file_name: "dosya".into(),
+            content_type: tur.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn sabr_adresi_reddediliyor() {
+        let hata = sabr_adresi_mi(
+            "https://rr2---sn-abc.googlevideo.com/videoplayback?expire=1&sabr=1&n=x",
+        )
+        .unwrap_err();
+        assert!(hata.to_string().contains("SABR"), "mesaj sebebi söylemiyor: {hata}");
+    }
+
+    /// SABR'siz googlevideo adresi (eski, `itag` taşıyan biçim) reddedilmemeli:
+    /// bu kural yalnızca yeni protokolü eliyor, YouTube'un tamamını değil.
+    #[test]
+    fn sabrsiz_googlevideo_adresi_geciyor() {
+        assert!(sabr_adresi_mi(
+            "https://rr2---sn-abc.googlevideo.com/videoplayback?itag=18&mime=video%2Fmp4"
+        )
+        .is_ok());
+    }
+
+    /// Başka bir sitede `sabr` diye bir sorgu alanı olması bizi ilgilendirmiyor.
+    #[test]
+    fn baska_hostta_sabr_alani_masum() {
+        assert!(sabr_adresi_mi("https://ornek.com/dosya.zip?sabr=1").is_ok());
+    }
+
+    /// Alan adı benzerliği yetmiyor: `notgooglevideo.com` başka bir site.
+    #[test]
+    fn benzer_alan_adi_googlevideo_sayilmiyor() {
+        assert!(sabr_adresi_mi("https://notgooglevideo.com/videoplayback?sabr=1").is_ok());
+    }
+
+    #[test]
+    fn ump_icerik_turu_reddediliyor() {
+        let hata = medya_yaniti_mi(&caps_ile_tur(Some("application/vnd.yt-ump"))).unwrap_err();
+        assert!(hata.to_string().contains("UMP"), "mesaj sebebi söylemiyor: {hata}");
+    }
+
+    #[test]
+    fn normal_icerik_turleri_geciyor() {
+        assert!(medya_yaniti_mi(&caps_ile_tur(Some("video/mp4"))).is_ok());
+        assert!(medya_yaniti_mi(&caps_ile_tur(Some("application/octet-stream"))).is_ok());
+        assert!(medya_yaniti_mi(&caps_ile_tur(None)).is_ok());
+    }
 
     #[test]
     fn content_range_toplam_boyutu_veriyor() {

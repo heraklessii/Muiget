@@ -95,6 +95,14 @@ pub enum DownloadError {
     #[error("{0}")]
     Drm(String),
 
+    /// Adres HTTP seviyesinde çalışıyor ama medya döndürmüyor: sunucu kendi
+    /// oynatma protokolünün kontrol akışını veriyor (YouTube SABR/UMP gibi).
+    /// Ayrı varyant, çünkü bunun tek alternatifi **sessizce çöp dosya
+    /// yazmak**tı — sunucu 200 dönüyor, motor da bunu başarı sayıyordu
+    /// (karar #33).
+    #[error("{0}")]
+    UnsupportedStream(String),
+
     /// Sunucu `Range` isteğini yok sayıp dosyanın tamamını göndermeye başladı.
     /// Segment #0 dışında bu ölümcül: yazmaya devam etmek dosyayı bozar.
     #[error("sunucu Range isteğini yok saydı (segment {segment})")]
@@ -141,8 +149,10 @@ pub fn yeniden_denenebilir(error: &DownloadError) -> bool {
         DownloadError::RangeIgnored { .. } => false,
         DownloadError::InvalidUrl(_) | DownloadError::Meta(_) | DownloadError::NotFound(_) => false,
         // Bozuk manifest ve DRM her denemede aynı sonucu verir; yanlış anahtarla
-        // çözülemeyen bir parça da öyle.
+        // çözülemeyen bir parça da öyle. Desteklenmeyen akış da kalıcı:
+        // sunucu her istekte aynı kontrol akışını döndürüyor.
         DownloadError::Manifest(_) | DownloadError::Drm(_) => false,
+        DownloadError::UnsupportedStream(_) => false,
         DownloadError::HttpStatus { status } => {
             // 408 (timeout) ve 429 (çok fazla istek) geçici; diğer 4xx kalıcı.
             matches!(status, 408 | 429) || *status >= 500

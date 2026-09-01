@@ -40,6 +40,14 @@ enum SunucuKipi {
     Yavas,
     /// `Authorization: Basic YWxpOmdpemxp` (ali:gizli) istiyor, yoksa 401.
     KimlikIster,
+    /// YouTube SABR taklidi: her isteğe **200** ve `application/vnd.yt-ump`.
+    ///
+    /// Ölçülen davranışın birebir kopyası (karar #33): `Content-Length` yok,
+    /// `Accept-Ranges` yok, gövdede medya değil `sabr.malformed_config` hata
+    /// yapısı var. Kip şart, çünkü tehlikeli olan sunucunun **hata
+    /// dönmemesi**: motor bunu boyutu bilinmeyen normal bir indirme sanıp
+    /// çöp gövdeyi dosya diye yazıyor ve "tamamlandı" diyordu.
+    SabrUmp,
 }
 
 /// [`SunucuKipi::KimlikIster`] kipinin beklediği başlık değeri — `ali:gizli`.
@@ -131,6 +139,20 @@ async fn baglantiyi_isle(
             stream.flush().await?;
             return stream.shutdown().await;
         }
+    }
+
+    // SABR: istek ne olursa olsun (HEAD de dahil) aynı kontrol akışı dönüyor.
+    if kip == SunucuKipi::SabrUmp {
+        let govde: &[u8] = b"\x2c\x1d\n\x15sabr.malformed_config\x10\x02";
+        let basliklar = "HTTP/1.1 200 OK\r\n\
+             Content-Type: application/vnd.yt-ump\r\n\
+             Connection: close\r\n\r\n";
+        stream.write_all(basliklar.as_bytes()).await?;
+        if !head_mi {
+            stream.write_all(govde).await?;
+        }
+        stream.flush().await?;
+        return stream.shutdown().await;
     }
 
     let toplam = icerik.len();
@@ -489,6 +511,65 @@ async fn iptal_edilen_indirme_dosya_birakmiyor() {
         kalanlar.push(g.file_name().to_string_lossy().into_owned());
     }
     assert!(kalanlar.is_empty(), "iptal sonrası dosya kalmış: {kalanlar:?}");
+}
+
+/// SABR/UMP yanıtı **başarı sayılmamalı**.
+///
+/// Bu, İlker'in "YouTube indirme çalışmıyor" bildiriminin altından çıkan asıl
+/// kusurun gerileme testi (karar #33). Kritik nokta sunucunun hata dönmemesi:
+/// 200 + gövde geliyor, motor da bunu boyutu bilinmeyen normal bir indirme
+/// sanıp birkaç yüz byte'lık kontrol akışını dosya diye yazıyor ve
+/// "tamamlandı" diyordu. Test hem durumu hem de **dosya bırakılmadığını**
+/// sınıyor: oynatılamayan bir dosyayı diskte bırakmak, hiç indirmemekten kötü.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sabr_ump_yaniti_basari_sayilmiyor() {
+    let sunucu = TestSunucusu::baslat(Vec::new(), SunucuKipi::SabrUmp).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let manager = DownloadManager::new(test_config(4)).unwrap();
+    let id = manager
+        .start(sunucu.url("/videoplayback?itag=137"), dir.path().to_path_buf())
+        .unwrap();
+
+    let durum = tamamlanmayi_bekle(&manager, &id).await;
+    assert_eq!(durum, DownloadStatus::Failed, "UMP kontrol akışı başarı sayıldı");
+
+    let hata = manager.get(&id).unwrap().error.unwrap_or_default();
+    assert!(
+        hata.contains("UMP") || hata.to_lowercase().contains("ump"),
+        "hata mesajı sebebi söylemiyor: {hata}"
+    );
+
+    let kalanlar: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|g| g.ok().map(|g| g.file_name()))
+        .collect();
+    assert!(kalanlar.is_empty(), "başarısız indirme dosya bıraktı: {kalanlar:?}");
+}
+
+/// SABR adresi ağa hiç çıkmadan reddediliyor.
+///
+/// Adres `sabr=1` taşıyorsa sonucu zaten biliyoruz; kullanıcıyı bir istek
+/// turu bekletmenin ve mesajı "medya değil"e düşürmenin anlamı yok. Sunucu
+/// bilerek **kapalı** bir porta bakıyor: istek atılsaydı bağlantı hatası
+/// alırdık, SABR mesajı değil.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sabr_adresi_istek_atmadan_reddediliyor() {
+    let dir = tempfile::tempdir().unwrap();
+    let manager = DownloadManager::new(test_config(4)).unwrap();
+
+    let id = manager
+        .start(
+            "https://rr2---sn-test.googlevideo.com/videoplayback?expire=1&sabr=1&n=abc".to_string(),
+            dir.path().to_path_buf(),
+        )
+        .unwrap();
+
+    let durum = tamamlanmayi_bekle(&manager, &id).await;
+    assert_eq!(durum, DownloadStatus::Failed);
+
+    let hata = manager.get(&id).unwrap().error.unwrap_or_default();
+    assert!(hata.contains("SABR"), "hata mesajı SABR demiyor: {hata}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

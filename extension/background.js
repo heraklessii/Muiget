@@ -269,6 +269,18 @@ const MPD_DESENI = /\.mpd(\?|#|$)/i;
 
 const DOGRUDAN_MEDYA_YAKALAMA = true;
 
+/** Adres YouTube'un SABR protokolüne mi ait?
+ *
+ *  SABR'da oynatıcı akışı adresle değil **POST gövdesindeki** protobuf
+ *  yapılandırmasıyla istiyor. Adreste `itag` ve `mime` yok, `sabr=1` var.
+ *  Aynı adrese düz `GET` atınca sunucu 200 dönüyor ama gövdede medya değil
+ *  `sabr.malformed_config` hatası oluyor — yani "indirildi" sanılan dosya
+ *  oynatılamayan birkaç yüz byte. Karar #33 ölçümü içeriyor.
+ *
+ *  `itag` yokluğu da SABR sayılıyor: bu kural olmadan gelecekteki bir varyant
+ *  sessizce "indirilebilir" görünürdü. */
+const YT_SABR = (u) => u.searchParams.get('sabr') === '1' || !u.searchParams.get('itag');
+
 /** YouTube akışının türü, `mime` sorgu alanından. */
 const YT_TUR = (u) => {
   const mime = decodeURIComponent(u.searchParams.get('mime') ?? '');
@@ -297,14 +309,25 @@ const DOGRUDAN_KURALLAR = [
 
     /* Aynı akışın kimliği `itag`: çözünürlük/kodek kombinasyonunu o belirliyor.
        Tekilleştirme buna göre yapılmazsa liste tek videonun parçalarıyla dolar
-       ve kullanıcı ses izini hiç göremez. */
-    kimlik: (u) => `youtube:${u.searchParams.get('itag') ?? u.pathname}`,
+       ve kullanıcı ses izini hiç göremez. SABR'da `itag` yok — hepsi tek
+       kayda düşüyor, zaten indirilebilir olmadıkları için doğru davranış bu. */
+    kimlik: (u) => (YT_SABR(u) ? 'youtube:sabr' : `youtube:${u.searchParams.get('itag') ?? u.pathname}`),
 
     etiket: (u) => {
+      if (YT_SABR(u)) return 'YouTube · SABR akışı';
       const tur = YT_TUR(u);
       const itag = u.searchParams.get('itag');
       return itag ? `YouTube · ${tur} · itag ${itag}` : `YouTube · ${tur}`;
     },
+
+    /* SABR indirilemiyor ve bunu **düğmeye basmadan önce** söylemek gerekiyor.
+       Yoksa kullanıcı indir diyor, masaüstü tarafı hata veriyor ve sebebi
+       uzantıda hiç görünmüyor. Karar #33. */
+    desteklenmiyor: (u) =>
+      YT_SABR(u)
+        ? 'YouTube bu videoyu SABR ile veriyor — adres tek başına medya ' +
+          'döndürmüyor, indirilemiyor.'
+        : null,
 
     /* Uyarlanır akışta video ve ses **ayrı** iniyor: video itag'ı tek başına
        indirilirse sessiz bir dosya çıkıyor. Karar #25 bunu açıkça yasaklıyor
@@ -336,6 +359,7 @@ function dogrudanEslesme(url) {
       etiket: kural.etiket(u),
       kimlik: kural.kimlik(u),
       sessiz: kural.sessiz?.(u) ?? false,
+      desteklenmiyor: kural.desteklenmiyor?.(u) ?? null,
     };
   }
   return null;
@@ -381,6 +405,7 @@ async function videoKaydet(tabId, giris) {
     tur: giris.tur,
     etiket: giris.etiket,
     sessiz: giris.sessiz ?? false,
+    desteklenmiyor: giris.desteklenmiyor ?? null,
     kimlik,
     at: Date.now(),
   });

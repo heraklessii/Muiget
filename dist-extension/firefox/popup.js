@@ -238,6 +238,18 @@ async function videolariListele(sekme) {
     // Tür yakalama anında belirleniyor; `tur` yoksa kayıt eski sürümden.
     tur.textContent = video.tur ?? 'HLS';
 
+    /* İndirilemeyen akış (şimdilik yalnızca YouTube SABR, karar #33): düğme
+       hiç gösterilmiyor. Gösterip masaüstü tarafında hata almak, kullanıcıya
+       sebebi hiç söylemeden "olmadı" demek olurdu. */
+    if (video.desteklenmiyor) {
+      const sebep = document.createElement('span');
+      sebep.className = 'oge__uyari';
+      sebep.textContent = video.desteklenmiyor;
+      satir.append(ad, tur, sebep);
+      liste.append(satir);
+      continue;
+    }
+
     // Sessiz akış: video izi tek başına indirilirse ses olmuyor. Karar #25
     // gereği bunu indirme anında değil, **düğmeye basmadan önce** söylemek
     // gerekiyor; sessiz dosyayı teslim edip sonra açıklamak en kötüsü.

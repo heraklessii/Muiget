@@ -1201,3 +1201,72 @@ o commit'te görülüyor.
 girdinin lisansını ve `dev` işaretini zaten taşıyor; alt süreç de gerekmiyor,
 `node_modules`'ün kurulu olması da. (Ayrıca Node 20+ Windows'ta `npm.cmd`'yi
 `execFile` ile çağırınca EINVAL veriyor.)
+
+---
+
+## 33. YouTube SABR: karar #27'nin dayanağı çöktü, indirme dürüstçe reddediliyor
+
+**Bağlam:** İlker "YouTube video indirme çalışmıyor" dedi. Tahmin etmek yerine
+gerçek istekler ölçüldü (tarayıcıda bir YouTube videosu açılıp
+`performance.getEntriesByType('resource')` okundu).
+
+**Ölçüm.** Videonun medya istekleri şöyle geliyor:
+
+    host   rr2---sn-….googlevideo.com
+    path   /videoplayback
+    sabr   1
+    itag   (yok)      mime  (yok)      range (yok)
+
+Aynı adrese düz `GET` atıldığında:
+
+    HTTP 200
+    Content-Type: application/vnd.yt-ump
+    (Content-Length yok, Accept-Ranges yok)
+    gövde: ",\x1d\n\x15sabr.malformed_config\x10\x02"
+
+Sayfanın oynatıcı verisi de aynı yeri gösteriyor: `streamingData.formats`
+**boş**, 40 uyarlanır biçimin hiçbirinde `url` ya da `signatureCipher` yok,
+`hlsManifestUrl`/`dashManifestUrl` yok, yalnızca `serverAbrStreamingUrl` var.
+
+**Sonuç: karar #27'nin dayanağı artık geçerli değil.** O karar şuna
+yaslanıyordu: "imza çözmüyoruz, tarayıcının zaten istediği adresi görüyoruz."
+YouTube SABR'a geçince adres **hangi akışı istediğini taşımaz** oldu; istek
+POST gövdesindeki protobuf yapılandırmasıyla anlatılıyor ve yanıt UMP
+çerçeveli geliyor. Görülen adres artık indirilebilir bir şeye işaret etmiyor.
+
+**Asıl kusur "inmiyor" değil, "sessizce çöp iniyordu".** Sunucu 200 dönüyor.
+Motor `Accept-Ranges` ve `Content-Length` göremeyince bunu boyutu bilinmeyen,
+tek bağlantılı normal bir indirme sanıyor, birkaç yüz byte'lık hata gövdesini
+dosya diye yazıyor ve **"tamamlandı"** diyordu. Kullanıcının gördüğü tam olarak
+buydu: hata yok, dosya var, açılmıyor. Bu, projenin kendi ilkesine aykırı
+(karar #25: "sessiz video teslim etmek, hata vermekten kötü").
+
+**Karar:** SABR akışı indirilebilir gibi gösterilmiyor, iki yerde reddediliyor:
+
+1. **Adres seviyesinde** (`download/http.rs` → `sabr_adresi_mi`). Host
+   `googlevideo.com` ve sorguda `sabr=1` varsa istek **hiç atılmıyor**.
+   Sonucu zaten biliyoruz; bir istek turu beklemenin faydası yok ve mesaj
+   burada sebebi adıyla söyleyebiliyor.
+2. **Yanıt seviyesinde** (`medya_yaniti_mi`). İçerik türü
+   `application/vnd.yt-ump` ise reddediliyor. Bu ağ: adres kuralı yarın
+   değişse bile "medya değil" yakalanıyor.
+
+Uzantı tarafında da düğme **gösterilmiyor**: SABR akışı listede sebebiyle
+duruyor. Düğmeyi gösterip masaüstünde hata almak, kullanıcıya sebebi hiç
+söylememek olurdu. `itag` yokluğu da SABR sayılıyor — bu kural olmasa
+gelecekteki bir varyant sessizce "indirilebilir" görünürdü.
+
+**Gerileme testleri.** `sabr_ump_yaniti_basari_sayilmiyor` yerel sunucuyu
+ölçülen davranışın birebir kopyasına sokuyor (200 + `application/vnd.yt-ump`,
+uzunluk yok) ve hem `Failed` durumunu hem de **dosya bırakılmadığını**
+sınıyor. `sabr_adresi_istek_atmadan_reddediliyor` kapalı bir porta bakıyor:
+istek atılsaydı bağlantı hatası alırdık, SABR mesajı değil. İkisi de düzeltme
+geçici olarak kaldırılıp doğrulandı — kaldırınca birincisi `Completed` diyor.
+
+**Ne yapılmadı: SABR'ın uygulanması.** Gerçek YouTube desteği artık protokolü
+yeniden yazmak demek — oynatıcı yapılandırmasını almak, protobuf `ustreamer`
+gövdesi üretmek, POST atmak, UMP çerçevelerini çözüp medyaya ayırmak. Bu,
+"tarayıcının istediği adresi görmek"ten bambaşka bir iş: kırılgan (YouTube
+değiştirdikçe bozulur) ve kapsamı belirgin biçimde büyütüyor. Yapılıp
+yapılmayacağı İlker'in kararı; bu oturumda yapılan yalnızca **yanlış sonucu
+doğru sonuçla değiştirmek** oldu.

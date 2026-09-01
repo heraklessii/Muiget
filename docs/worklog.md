@@ -7,7 +7,7 @@ Format: Tarih, yapılanlar, kararlar, sıradaki adım.
 
 ---
 
-## 2026-09-01 (15. oturum) — "1.0'a hazır mı?" Sorusu, `NOTICE` Üreticisi
+## 2026-09-01 (15. oturum) — "1.0'a hazır mı?", `NOTICE` Üreticisi, YouTube SABR
 
 İstek iki adımlıydı: "ilk stabil sürüme hazır mı? hazırsa release et." Cevap
 **hayır** oldu, dolayısıyla yayın yapılmadı. Bunun yerine hazır olmayı
@@ -16,7 +16,7 @@ engelleyen tek kod işi bitirildi ve geri kalanı ölçülebilir bir listeye
 
 ### 1. Durum tespiti (yayın yapılmadı)
 
-Önce iddia değil ölçüm: `cargo test` 332 test geçiyor (291 birim + 22 akış +
+Önce iddia değil ölçüm: `cargo test` 341 test geçiyor (300 birim + 22 akış +
 19 indirme), `cargo check --all-targets` 0 uyarı, `npm run build` temiz,
 çalışma ağacı temiz ve `v0.1.5` etiketi `HEAD`'de duruyor. Yani kodda 1.0'ı
 bekleten bir kırıklık yok.
@@ -71,6 +71,51 @@ Tazeliği CI kontrol ediyor: `npm run lisans:kontrol` dosyayı yeniden üretip
 diskteki ile karşılaştırıyor, fark varsa derleme düşüyor (`ci.yml` → `rust`
 işi). Bağımlılık eklenip bildirimin güncellenmemesi artık yayın gününde değil,
 o commit'te görülüyor. Uzantı paketlerinin kontrolüyle aynı mantık.
+
+### 3. "YouTube indirme çalışmıyor" — ölçüm ve dürüst ret (karar #33)
+
+İlker bildirdi. Üç farklı sebebi olabilirdi (yakalama görmüyor / adres 403
+alıyor / ffmpeg yok), o yüzden tahmin yerine gerçek istekler ölçüldü:
+tarayıcıda bir YouTube videosu açılıp `performance.getEntriesByType('resource')`
+okundu.
+
+Çıkan tablo net: medya istekleri `googlevideo.com/videoplayback` adresine
+gidiyor ama adreste **`itag` de `mime` de yok**, yerine `sabr=1` var. Aynı
+adrese düz `GET` atınca sunucu **200** dönüyor,
+`Content-Type: application/vnd.yt-ump` ve gövdede medya değil
+`sabr.malformed_config`. Sayfanın oynatıcı verisi de aynı yeri gösteriyor:
+`streamingData.formats` boş, 40 uyarlanır biçimin hiçbirinde `url` ya da
+`signatureCipher` yok, yalnızca `serverAbrStreamingUrl` var.
+
+Yani **karar #27'nin dayanağı çökmüş**: "tarayıcının zaten istediği adresi
+görüyoruz" artık doğru değil, çünkü adres hangi akışı istediğini taşımıyor —
+istek POST gövdesindeki protobuf yapılandırmasında.
+
+**Asıl kusur "inmiyor" değildi, sessizce çöp iniyordu.** Sunucu 200 dönüyor,
+`Accept-Ranges` ve `Content-Length` yok; motor bunu boyutu bilinmeyen normal
+bir indirme sanıp birkaç yüz byte'lık hata gövdesini dosya diye yazıyor ve
+"tamamlandı" diyordu. Hata yok, dosya var, açılmıyor. Projenin kendi ilkesine
+aykırı (karar #25: sessiz/bozuk dosya teslim etmek, hata vermekten kötü).
+
+Yapılan: iki katmanlı ret. Adres seviyesinde `sabr=1` + googlevideo → istek
+hiç atılmıyor (sonuç zaten belli, mesaj sebebi adıyla söylüyor); yanıt
+seviyesinde `application/vnd.yt-ump` → reddediliyor (adres kuralı yarın
+değişse bile ağ tutuyor). Uzantıda SABR akışı listede duruyor ama **indir
+düğmesi yok**, yerinde sebebi yazıyor.
+
+İki gerileme testi eklendi ve **düzeltme geçici olarak kaldırılıp
+doğrulandı** — kaldırınca `sabr_ump_yaniti_basari_sayilmiyor` `Completed`
+diyor, yani test gerçekten bu hatayı yakalıyor. Toplam 349 test (306 birim +
+22 akış + 21 indirme), clippy temiz.
+
+**Yapılmayan: SABR'ın uygulanması.** Gerçek YouTube desteği artık protokolü
+yeniden yazmak demek (oynatıcı yapılandırması, protobuf gövde, POST, UMP
+çözme). Kırılgan ve kapsamı büyütüyor; İlker'in kararı. Bu oturumda yapılan
+yalnızca yanlış sonucu doğru sonuçla değiştirmek.
+
+**Bir düzeltme:** bu oturumun başında test sayısını 341 → 332 diye
+değiştirmiştim, çıktıyı yanlış okumuşum. Doğrusu 341'di (300 birim + 22 + 19);
+bu oturumdan sonra 349. Belgelerdeki sayılar düzeltildi.
 
 ### Sıradaki
 

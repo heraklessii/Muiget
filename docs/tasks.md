@@ -176,6 +176,16 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
 - [ ] Chrome Web Store yayını
 - [ ] AMO (addons.mozilla.org) yayını — kalıcı kurulum imzalama istiyor;
       geçici eklenti Firefox kapanınca kalkıyor.
+- [x] **YouTube SABR dürüstçe reddediliyor** (karar #33). Ölçüldü: adres artık
+      `itag`/`mime` taşımıyor, `sabr=1` var ve düz `GET` 200 dönüp gövdede
+      medya yerine `application/vnd.yt-ump` kontrol akışı veriyor. Motor bunu
+      **sessizce çöp dosya** olarak yazıp "tamamlandı" diyordu; artık iki
+      katmanda reddediliyor ve uzantı indir düğmesini hiç göstermiyor.
+- [ ] **SABR protokolünün uygulanması** — karar bekliyor, İlker'in.
+      Gerçek YouTube desteği artık oynatıcı yapılandırmasını almak, protobuf
+      `ustreamer` gövdesi üretip POST atmak ve UMP çerçevelerini çözmek
+      demek. Kırılgan (YouTube değiştirdikçe bozulur) ve kapsamı belirgin
+      biçimde büyütüyor. Yapılmazsa YouTube kalıcı olarak kapsam dışı.
 
 ## Faz 6 — Medya Özel ve Güven Katmanı 🟡 (HLS/DASH ve checksum bitti)
 
@@ -285,7 +295,7 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
 ## 1.0 Kapıları — "Stabil" Diyebilmek İçin Ne Gerekiyor
 
 15. oturumda soruldu: "ilk stabil sürüme hazır mı?" Cevap **hayır** oldu ve
-sebepleri dağınık durduğu için buraya tek listede toplandı. Kod sağlıklı — 332
+sebepleri dağınık durduğu için buraya tek listede toplandı. Kod sağlıklı — 349
 test geçiyor, `cargo clippy -D warnings` temiz, arayüz derleniyor. Eksik olan
 kod değil, **kanıt**: motorun en önemli iddiaları bugüne kadar yalnızca kendi
 yerel test sunucumuza karşı doğrulandı.
@@ -307,7 +317,9 @@ Kapılar, kapanma sırasına göre:
       `chrome://extensions` üzerinden yüklenmedi; Firefox tarafı hiç
       denenmedi. Uzantı, IDM'e karşı asıl rekabet edilen yer — çalıştığı
       görülmeden 1.0 olmaz.
-- [ ] **K4 — Akış videosunun sahada bir kez indirilip izlenmesi.** Faz 6 (HLS/
+- [ ] **K4 — Akış videosunun sahada bir kez indirilip izlenmesi.** (YouTube bu
+      kapının kanıtı olamaz: SABR yüzünden kapsam dışı, bkz. karar #33 —
+      denemenin HLS/DASH kullanan başka bir sağlayıcıda yapılması gerekiyor.) Faz 6 (HLS/
       DASH, ses çıkarma, altyazı) gerçek bir sağlayıcıya karşı hiç
       çalıştırılmadı. ffmpeg entegrasyonu **sahte bir ffmpeg betiğiyle**
       testli; gerçek ffmpeg'in `-c copy` çıktısını kimse izlemedi. İnen `.vtt`
