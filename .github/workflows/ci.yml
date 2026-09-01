@@ -89,6 +89,14 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
 
+      # NOTICE üretilmiş bir dosya (tools/lisans-uret.js). Bir bağımlılık
+      # eklenip bildirim güncellenmezse Apache-2.0'ın istediği üçüncü parti
+      # listesi eksik kalır — bunu yayın gününde fark etmek istemiyoruz.
+      # Betik `cargo metadata` ve `package-lock.json` okuyor, ikisi de bu işte
+      # zaten hazır.
+      - name: NOTICE güncel mi
+        run: npm run lisans:kontrol
+
   # Linux derlemesi yayın iş akışına eklendi; bunun ilk kez bir etiket
   # atıldığında denenmesi, yayını kırılgan hâle getirirdi. Burada yalnızca
   # `cargo check`: testler Windows işinde zaten koşuyor ve aynı motoru iki kez

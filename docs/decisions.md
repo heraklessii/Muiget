@@ -1149,3 +1149,55 @@ da ekleniyor (`release.yml` → `uzanti` işi).
 **Denenmedi:** kod ve testler hazır, gerçek bir Firefox kurulumunda
 çalıştırılmadı. Chrome tarafı 8. oturumda gerçek Chrome'la doğrulanmıştı;
 Firefox için aynı doğrulama bekliyor.
+
+---
+
+## 32. `NOTICE` elle değil, kilit dosyalarından üretiliyor
+
+**Bağlam:** `NOTICE` ilk günden beri elle yazılmıştı ve dosyanın kendi sonunda
+"yayın öncesi yeniden üretilmeli, bu bir yayın engeli" notu duruyordu. Ne kadar
+geride kaldığı 15. oturumda ölçüldü: dosya 25 bileşen listeliyordu, dağıtılan
+ağaçta **572 crate** var. Dahası listede `librqbit` yazıyordu — Faz 4'te
+eklenecek olan, `Cargo.toml`'da bulunmayan bir crate. Yani liste hem eksikti
+hem yanlış.
+
+**Karar:** `NOTICE` üretilmiş bir çıktı. Üretici `tools/lisans-uret.js`,
+`npm run lisans` ile çalışıyor; kaynağı `cargo metadata` ve
+`package-lock.json`. Elle düzenlenmiyor, dosyanın başında da böyle yazıyor.
+
+`cargo about` kurulmadı. İki sebep: yeni bir global araç ve uzun bir derleme
+getiriyor, üstelik ihtiyacımız olan veri `cargo metadata`'nın zaten verdiği
+alanların içinde. Aynı desen depoda zaten var — uzantı paketleri de tek
+kaynaktan türetiliyor (karar #31).
+
+**Kapsam kuralı: dağıtılan ne varsa listeleniyor.** Çözümlenmiş graf üzerinde
+kökten yürünüyor ve `dev` kenarları atlanıyor. `Cargo.lock`'u olduğu gibi
+okumak yanlış olurdu: kilit dosyası `tempfile` gibi yalnızca teste giren
+crate'leri de içeriyor ve onlar kullanıcıya gitmiyor. Derleme (build)
+bağımlılıkları **listeleniyor** — ürettikleri kod binary'ye giriyor, eksik
+bildirmektense fazla bildirmek doğru taraf. `cargo metadata` platform süzmesi
+yapılmadan çağrılıyor: yayın üç işletim sistemine paket üretiyor, bildirim de
+üçünün toplamı olmalı.
+
+**İzin verici olmayan lisanslar ayrı bölümde.** 572 satırlık bir listede
+MPL-2.0 gözden kaçar. Betik SPDX ifadesini seçeneklerine ayırıp en az bir
+seçeneğin tamamen izin verici olup olmadığına bakıyor; olmayanlar başa, adıyla
+ve adresiyle yazılıyor. Bu derlemede altı tane çıktı: beş MPL-2.0 (WebView
+tarafından gelen `cssparser`/`selectors`/`stylo` ailesi) ve `webpki-roots`
+(CDLA-Permissive-2.0). Hiçbiri Apache-2.0 dağıtımını engellemiyor — MPL dosya
+düzeyinde copyleft, yalnızca değiştirilen kendi dosyalarını istiyor.
+
+**Lisans ifadeleri tek yazıma çekiliyor.** `MIT/Apache-2.0` SPDX'e
+çevriliyor ve `OR` seçenekleri alfabetik sıraya sokuluyor. Olmasa aynı lisans
+üç ayrı başlığa dağılıyordu (`MIT OR Apache-2.0`, `Apache-2.0 OR MIT`,
+`MIT/Apache-2.0` — toplam 344 crate). Parantezli ifadelere dokunulmuyor.
+
+**CI tazeliği kontrol ediyor.** `npm run lisans:kontrol` dosyayı yeniden üretip
+diskteki ile karşılaştırıyor, fark varsa derleme düşüyor (`ci.yml` → `rust`
+işi). Bağımlılık eklenip bildirimin güncellenmemesi artık yayın gününde değil,
+o commit'te görülüyor.
+
+**`npm ls` çağrılmıyor, `package-lock.json` okunuyor.** Lockfile v3 her
+girdinin lisansını ve `dev` işaretini zaten taşıyor; alt süreç de gerekmiyor,
+`node_modules`'ün kurulu olması da. (Ayrıca Node 20+ Windows'ta `npm.cmd`'yi
+`execFile` ile çağırınca EINVAL veriyor.)

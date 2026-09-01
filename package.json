@@ -11,7 +11,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "uzanti": "node tools/uzanti-paketle.js",
-    "uzanti:magaza": "node tools/uzanti-paketle.js --magaza"
+    "uzanti:magaza": "node tools/uzanti-paketle.js --magaza",
+    "lisans": "node tools/lisans-uret.js",
+    "lisans:kontrol": "node tools/lisans-uret.js --kontrol"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

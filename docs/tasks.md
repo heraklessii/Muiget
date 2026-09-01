@@ -25,9 +25,11 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
       [heraklessii/Muiget](https://github.com/heraklessii/Muiget) (public)
 - [x] `Cargo.toml`, `README.md` ve `NOTICE` gerçek repo adresine güncellendi;
       README'ye CI rozeti eklendi
-- [~] `NOTICE` gerçek bağımlılık ağacından yeniden üretilecek — şu an yalnızca
-      doğrudan bağımlılıkları listeliyor. **Yayın öncesi zorunlu:**
-      `cargo about generate` + `npx license-checker --production`
+- [x] `NOTICE` gerçek bağımlılık ağacından üretiliyor (karar #32).
+      `tools/lisans-uret.js` → `npm run lisans`; kaynağı `cargo metadata` +
+      `package-lock.json`, kapsamı dağıtılan ağaç (test bağımlılıkları hariç).
+      572 crate + 7 npm paketi; izin verici olmayan altı lisans ayrı bölümde.
+      Tazeliği CI kontrol ediyor (`npm run lisans:kontrol`)
 
 ## Faz 1 — Segmentasyon Motoru ✅
 
@@ -279,6 +281,56 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
       zaman damgaları). Gerçekten doğrulanabilir yayın isteniyorsa yol
       `cargo auditable` + yeniden üretilebilir derleme ayarları; şimdilik
       yalnızca not.
+
+## 1.0 Kapıları — "Stabil" Diyebilmek İçin Ne Gerekiyor
+
+15. oturumda soruldu: "ilk stabil sürüme hazır mı?" Cevap **hayır** oldu ve
+sebepleri dağınık durduğu için buraya tek listede toplandı. Kod sağlıklı — 332
+test geçiyor, `cargo clippy -D warnings` temiz, arayüz derleniyor. Eksik olan
+kod değil, **kanıt**: motorun en önemli iddiaları bugüne kadar yalnızca kendi
+yerel test sunucumuza karşı doğrulandı.
+
+Kapılar, kapanma sırasına göre:
+
+- [x] **K1 — `NOTICE` doğru.** Kapandı (karar #32). Apache-2.0'ın istediği
+      üçüncü parti bildirimi artık gerçek ağaçtan üretiliyor. Kapı olmasının
+      sebebi: "1.0" etiketi, lisans bildiriminin doğru olduğu iddiasını da
+      taşıyor.
+- [ ] **K2 — Gerçek uzak sunucudan büyük dosya indirme.** Bütün uçtan uca
+      testler `127.0.0.1`'e karşı koşuyor; ağ gecikmesi, paket kaybı, CDN
+      davranışı ve TLS el sıkışma maliyeti hiç görülmedi. En az bir ISO/zip
+      indirilip SHA-256'sı sağlayıcının verdiğiyle karşılaştırılmalı, süresi
+      IDM ile yan yana konmalı. Bu ölçüm yapılmadan "IDM kadar hızlı" cümlesi
+      tahmin. **İlker'in makinesinde, bir akşamlık iş.**
+- [ ] **K3 — Uzantı gerçek bir tarayıcıya yükleniyor.** Köprü protokolü 8.
+      oturumda Chrome'un kendi çağrısıyla doğrulandı ama uzantı hiçbir zaman
+      `chrome://extensions` üzerinden yüklenmedi; Firefox tarafı hiç
+      denenmedi. Uzantı, IDM'e karşı asıl rekabet edilen yer — çalıştığı
+      görülmeden 1.0 olmaz.
+- [ ] **K4 — Akış videosunun sahada bir kez indirilip izlenmesi.** Faz 6 (HLS/
+      DASH, ses çıkarma, altyazı) gerçek bir sağlayıcıya karşı hiç
+      çalıştırılmadı. ffmpeg entegrasyonu **sahte bir ffmpeg betiğiyle**
+      testli; gerçek ffmpeg'in `-c copy` çıktısını kimse izlemedi. İnen `.vtt`
+      bir oynatıcıda açılıp zamanlaması tutuyor mu, o da bilinmiyor.
+- [ ] **K5 — Linux ve macOS paketlerinin en az bir kez açılması.** CI ikisini
+      de derliyor, ikisi de hiç çalıştırılmadı. Açılıp bir dosya indirebiliyor
+      olmaları yeter; olmuyorsa 1.0 yalnızca Windows'a verilir ve yayın notu
+      bunu yazar.
+- [ ] **K6 — Arayüzün elle gözden geçirilmesi.** Otomatik arayüz testi yok
+      (bilinçli açık borç). En azından sürükle-bırak, toplu ekleme, kopya
+      uyarısı ve "SHA-256 hesapla" menüsü gerçek pencerede tıklanmalı.
+
+Kapı **olmayanlar**, karışmasın diye:
+
+- **Torrent (Faz 4).** IDM'de de yok; 1.0'ın eksiği sayılmaz, README zaten
+  planlanan diye yazıyor.
+- **Kod imzalama sertifikası.** SmartScreen/Gatekeeper uyarısı gerçek bir
+  edinme engeli ama sürüm numarasıyla ilgisi yok; para ve kimlik doğrulaması
+  işi, kodla çözülmüyor.
+- **Arayüzün otomatik testi.** Borç olarak duruyor, 1.0'ı bekletmiyor.
+
+K2–K6'nın hepsi kod değil **deneme** işi ve İlker'in makinesinde yapılıyor.
+Hepsi kapandığında sürüm `1.0.0` olur; o güne kadar 0.x devam.
 
 ## Sıradaki (Şu Anki Öncelik)
 

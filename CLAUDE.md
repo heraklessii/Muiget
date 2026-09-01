@@ -50,7 +50,7 @@ NOTICE dosyası yeterli) — sade tutulacak.
 muiget/
 ├── CLAUDE.md                   ✅ Bu dosya
 ├── LICENSE                     ✅ Apache 2.0 tam metni
-├── NOTICE                      ✅ Üçüncü parti lisans bildirimleri
+├── NOTICE                      ✅ ÜRETİLMİŞ — üçüncü parti lisans bildirimi
 ├── README.md                   ✅ Kullanıcıya dönük tanıtım
 ├── .gitignore                  ✅
 ├── package.json                ✅ npm — Vite/React + @tauri-apps/cli
@@ -60,7 +60,8 @@ muiget/
 ├── .github/workflows/          ✅ ci.yml, release.yml, pages.yml
 ├── site/                       ✅ GitHub Pages tanıtım sayfası (index.html)
 ├── tools/                      ✅ ikon-uret.js (uygulama ikonu üretici),
-│                                  uzanti-paketle.js (Chrome + Firefox paketi)
+│                                  uzanti-paketle.js (Chrome + Firefox paketi),
+│                                  lisans-uret.js (NOTICE üretici, karar #32)
 ├── docs/
 │   ├── ekran-goruntusu.png     ✅ Uygulamanın kendi penceresinden
 │   ├── project_overview.md     ✅ Ürün vizyonu, hedef kitle, rakip analizi
@@ -146,6 +147,8 @@ cargo check       # src-tauri/ içinde, hızlı Rust doğrulaması
 cargo test        # 300 birim + 41 uçtan uca test
 npm run uzanti    # extension/ → dist-extension/{chrome,firefox}
 npm run uzanti:magaza  # mağaza derlemesi: YouTube yakalaması kapalı (#27)
+npm run lisans    # NOTICE'ı bağımlılık ağacından yeniden üret (#32)
+npm run lisans:kontrol  # NOTICE güncel mi (CI bunu koşuyor)
 ```
 
 Uçtan uca testler elle yazılmış küçük HTTP sunucuları kaldırıp motoru onlara
@@ -236,6 +239,11 @@ Detaylar için `docs/decisions.md`. Kısa özet:
     (`muiget@muiget.app`, kullanıcıdan istenmiyor). Uzantı paketleri
     `tools/uzanti-paketle.js` ile **tek kaynaktan türetiliyor**; ikinci bir
     elle yazılmış manifest yok (karar #31).
+21. **`NOTICE` üretilmiş bir dosya**: `tools/lisans-uret.js` bildirimi
+    `cargo metadata` + `package-lock.json`tan türetiyor (572 crate, 7 npm
+    paketi). Kapsam dağıtılan ağaç — test bağımlılıkları hariç, derleme
+    bağımlılıkları dahil. İzin verici olmayan lisanslar (5 MPL-2.0 + 1
+    CDLA) ayrı bölümde. Tazeliği CI kontrol ediyor (karar #32).
 
 ## Çalışma Tarzı Notları
 
@@ -249,9 +257,16 @@ Detaylar için `docs/decisions.md`. Kısa özet:
 
 ## Sıradaki Adım
 
+> **1.0 hazır değil.** 15. oturumda soruldu ve hayır çıktı; sebepler
+> `docs/tasks.md` → "1.0 Kapıları" başlığında K1–K6 olarak duruyor. Kod
+> sağlıklı (332 test, 0 uyarı); eksik olan **kanıt** — motor yalnızca yerel
+> test sunucusuna karşı doğrulandı, uzantı hiçbir tarayıcıya yüklenmedi, Faz 6
+> gerçek bir sağlayıcıya karşı hiç çalışmadı. K1 (`NOTICE`) kapandı; kalan beşi
+> kod değil deneme işi. Hepsi kapanana kadar sürüm 0.x devam ediyor.
+
 **Faz 0, 1, 2, 3, 5 ve Faz 6'nın çekirdeği tamamlandı.** Çalışan bir segmentli
 indirme motoru, **HLS/DASH video indirme**, tam bir arayüz ve **Chrome/Edge +
-Firefox** uzantısı var. 341 test geçiyor. Uygulama gerçek penceresinde uçtan
+Firefox** uzantısı var. 332 test geçiyor. Uygulama gerçek penceresinde uçtan
 uca doğrulandı (8 MB dosya, 8 paralel segment, SHA-256 birebir aynı) ve
 10. oturumda akış indirmesi de aynı yöntemle doğrulandı (yerel VOD playlisti,
 parçalar paralel indi, SHA-256 birebir). Chrome köprüsü de Chrome'un gerçek

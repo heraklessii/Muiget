@@ -7,6 +7,81 @@ Format: Tarih, yapılanlar, kararlar, sıradaki adım.
 
 ---
 
+## 2026-09-01 (15. oturum) — "1.0'a hazır mı?" Sorusu, `NOTICE` Üreticisi
+
+İstek iki adımlıydı: "ilk stabil sürüme hazır mı? hazırsa release et." Cevap
+**hayır** oldu, dolayısıyla yayın yapılmadı. Bunun yerine hazır olmayı
+engelleyen tek kod işi bitirildi ve geri kalanı ölçülebilir bir listeye
+çevrildi.
+
+### 1. Durum tespiti (yayın yapılmadı)
+
+Önce iddia değil ölçüm: `cargo test` 332 test geçiyor (291 birim + 22 akış +
+19 indirme), `cargo check --all-targets` 0 uyarı, `npm run build` temiz,
+çalışma ağacı temiz ve `v0.1.5` etiketi `HEAD`'de duruyor. Yani kodda 1.0'ı
+bekleten bir kırıklık yok.
+
+Bekleten şey **kanıt**. Motorun en önemli iddiaları bugüne kadar yalnızca
+`127.0.0.1`'e karşı doğrulandı: gerçek bir uzak sunucudan tek bir büyük dosya
+indirilmedi, uzantı hiçbir tarayıcıya yüklenmedi, Faz 6 hiçbir gerçek video
+sağlayıcısına karşı çalıştırılmadı (ffmpeg entegrasyonu **sahte bir ffmpeg
+betiğiyle** testli), Linux/macOS paketleri derleniyor ama hiç açılmadı. Bunlar
+`docs/tasks.md`'de "1.0 Kapıları" başlığı altında K1–K6 olarak toplandı —
+dağınık dururken hangi eksiğin sürümü beklettiği görünmüyordu.
+
+Kapı **olmayanlar** da yazıldı: torrent (IDM'de de yok), kod imzalama
+sertifikası (edinme engeli ama sürümle ilgisi yok) ve arayüzün otomatik testi.
+
+### 2. `NOTICE` artık üretiliyor (karar #32) — K1 kapandı
+
+Kapıların tek kod işi buydu ve dosyanın kendi sonunda "yayın öncesi zorunlu"
+diye duruyordu. Ne kadar geride kaldığı ölçüldüğünde ortaya çıktı: dosya 25
+bileşen listeliyordu, dağıtılan ağaçta **572 crate** var. Üstelik listede
+`librqbit` yazıyordu — Faz 4'te eklenecek olan, `Cargo.toml`'da bulunmayan bir
+crate. Liste hem eksikti hem yanlıştı.
+
+`tools/lisans-uret.js` yazıldı (`npm run lisans`). `cargo about` kurulmadı:
+yeni bir global araç ve uzun bir derleme getiriyor, oysa ihtiyaç duyulan veri
+`cargo metadata`'nın zaten verdiği alanların içinde. Depoda aynı desen zaten
+vardı — uzantı paketleri de tek kaynaktan türetiliyor (karar #31).
+
+Kapsam kuralı "dağıtılan ne varsa": çözümlenmiş graf üzerinde kökten yürünüyor
+ve `dev` kenarları atlanıyor. `Cargo.lock`'u olduğu gibi okumak yanlış olurdu,
+kilit dosyası `tempfile` gibi yalnızca teste giren crate'leri de içeriyor.
+Derleme bağımlılıkları listeleniyor — ürettikleri kod binary'ye giriyor, eksik
+bildirmektense fazla bildirmek doğru taraf. Platform süzmesi yok: yayın üç
+işletim sistemine paket üretiyor.
+
+İki ayrıntı çıktıyı okunur yaptı:
+
+- **İzin verici olmayan lisanslar ayrı bölümde.** 572 satırlık listede MPL-2.0
+  gözden kaçar. SPDX ifadesi seçeneklerine ayrılıp en az bir seçeneğin tamamen
+  izin verici olup olmadığına bakılıyor. Altı tane çıktı: beş MPL-2.0 (WebView
+  tarafından gelen `cssparser`/`selectors`/`stylo` ailesi) ve `webpki-roots`
+  (CDLA-Permissive-2.0). Hiçbiri Apache-2.0 dağıtımını engellemiyor.
+- **İfadeler tek yazıma çekiliyor.** `OR` seçenekleri alfabetik sıralanıyor;
+  olmasa aynı lisans üç başlığa dağılıyordu (`MIT OR Apache-2.0`,
+  `Apache-2.0 OR MIT`, `MIT/Apache-2.0` — toplam 344 crate).
+
+npm tarafı `npm ls` çağırmıyor, `package-lock.json` okuyor: lockfile v3 lisansı
+ve `dev` işaretini zaten taşıyor. (Ek olarak Node 20+ Windows'ta `npm.cmd`'yi
+`execFile` ile çağırınca EINVAL veriyor — ilk sürüm buna takıldı.)
+
+Tazeliği CI kontrol ediyor: `npm run lisans:kontrol` dosyayı yeniden üretip
+diskteki ile karşılaştırıyor, fark varsa derleme düşüyor (`ci.yml` → `rust`
+işi). Bağımlılık eklenip bildirimin güncellenmemesi artık yayın gününde değil,
+o commit'te görülüyor. Uzantı paketlerinin kontrolüyle aynı mantık.
+
+### Sıradaki
+
+`docs/tasks.md` → "1.0 Kapıları". K1 kapandı; K2–K6'nın hepsi kod değil
+**deneme** işi ve İlker'in makinesinde yapılıyor. Sıra öneriliyor: K2 (gerçek
+uzak sunucudan büyük dosya + IDM karşılaştırması) ve K3 (uzantıyı tarayıcıya
+yükleme) bir akşamda birlikte bitebilir; K4 en uzun olanı. Hepsi kapanana kadar
+sürüm 0.x devam ediyor.
+
+---
+
 ## 2026-09-01 (14. oturum) — Firefox Desteği ve Uzantı Paketleyici (Faz 5)
 
 İstek: "geliştirmeye devam et." `docs/tasks.md` → "Sıradaki" listesindeki ilk
