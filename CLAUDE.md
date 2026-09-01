@@ -254,6 +254,11 @@ Detaylar için `docs/decisions.md`. Kısa özet:
   sorusu, iç güzellikten önce geliyor.
 - Her yeni oturumda önce `docs/worklog.md`'nin son girdisini, sonra
   `docs/tasks.md`'nin "Sıradaki" bölümünü oku.
+- **Commit ve push sorulmaz.** İş bitip testler geçtiğinde `git add` +
+  `git commit` + `git push origin main` kendiliğinden yapılır; ayrı dal
+  açılmaz. Belgeler (worklog/tasks/decisions) commit'e dahil edilir.
+  İzin istenen tek şey **build ve release**: sürüm numarasını değiştirmek,
+  `git tag v…` atmak ve GitHub Release yayınlamak İlker'in kararı.
 
 ## Sıradaki Adım
 
