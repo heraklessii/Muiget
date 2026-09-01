@@ -32,12 +32,20 @@ interface Props {
 }
 
 /**
- * Chrome uzantı kimliği: 32 karakter, yalnızca a–p arası küçük harf.
+ * Uzantı kimliği geçerli mi? (karar #31)
+ *
+ * Chrome/Edge: 32 karakter, yalnızca a–p arası küçük harf.
+ * Firefox: `ad@alan` ya da `{GUID}` — Firefox kimliği uzantının kendi beyanı.
+ *
  * Aynı kural Rust tarafında da uygulanıyor (`settings::gecerli_uzanti_kimligi`);
  * burada olması kullanıcıyı yazarken uyarmak için.
  */
 function gecerliKimlik(id: string): boolean {
-  return /^[a-p]{32}$/.test(id);
+  return (
+    /^[a-p]{32}$/.test(id) ||
+    /^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(id) ||
+    /^\{[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}$/.test(id)
+  );
 }
 
 /**
@@ -94,7 +102,14 @@ export function SettingsDialog({ settings, onClose, onSave, onSaveQuiet, onResca
     }
   }
 
-  const kimlikGecerli = gecerliKimlik(taslak.extensionIds[0] ?? '');
+  /**
+   * Boş kutu da geçerli: Firefox uzantısının kimliğini paketi üretirken biz
+   * yazıyoruz, kullanıcının elinde bir karşılığı yok. Kimlik istemek yalnızca
+   * Chrome/Edge için gerekli — sırf onun yüzünden Firefox kullanıcısının
+   * köprüyü kuramaması saçma olurdu (karar #31).
+   */
+  const kimlikMetni = (taslak.extensionIds[0] ?? '').trim();
+  const kimlikGecerli = kimlikMetni === '' || gecerliKimlik(kimlikMetni);
 
   /**
    * Köprüyü kurmak ayarları da kaydediyor: manifest kimliğe göre yazılıyor ve
@@ -105,8 +120,8 @@ export function SettingsDialog({ settings, onClose, onSave, onSaveQuiet, onResca
     setKopruSonucu(null);
     try {
       await onSaveQuiet(taslak);
-      const yol = await installNativeHost(taslak.extensionIds);
-      setKopruSonucu(`Köprü kuruldu. Manifest: ${yol}`);
+      const yollar = await installNativeHost(taslak.extensionIds);
+      setKopruSonucu(`Köprü kuruldu. Manifestler: ${yollar.join('  •  ')}`);
     } catch (e) {
       setKopruSonucu(`Köprü kurulamadı: ${errorMessage(e)}`);
     } finally {
@@ -661,11 +676,13 @@ export function SettingsDialog({ settings, onClose, onSave, onSaveQuiet, onResca
 
           <label className="field">
             <span>
-              Chrome uzantısı kimliği
+              Chrome / Edge uzantısı kimliği
               <br />
               <span className="field-hint">
-                <code>chrome://extensions</code> sayfasında uzantı kartında yazan 32
-                harflik kimlik. Yalnızca buradaki uzantı köprüyü kullanabilir.
+                <code>chrome://extensions</code> (Edge'de <code>edge://extensions</code>)
+                sayfasında uzantı kartında yazan 32 harflik kimlik. Yalnızca buradaki
+                uzantı köprüyü kullanabilir. <b>Firefox için boş bırakın:</b> Firefox
+                uzantısının kimliği sabit ve köprü onu kendiliğinden tanıyor.
               </span>
             </span>
             <div className="row">

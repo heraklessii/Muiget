@@ -51,18 +51,77 @@ pub const HOST_FLAG: &str = "--native-host";
 /// Edge de Chromium tabanlı olduğu için aynı öneki veriyor.
 pub const ORIGIN_PREFIX: &str = "chrome-extension://";
 
+/// Köprüyü konuşan tarayıcı ailesi (karar #31).
+///
+/// İkisi de aynı stdio protokolünü konuşuyor; ayrıldıkları yer **manifest**:
+/// izin listesinin alan adı, dosyanın durduğu yer ve Windows'ta registry kökü.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Browser {
+    /// Chrome ve Edge — aynı manifest biçimi, aynı `chrome-extension://` kaynağı.
+    Chromium,
+    Firefox,
+}
+
+impl Browser {
+    /// Manifest dosya adı. Windows'ta iki manifest de aynı klasöre yazılıyor
+    /// (yolu registry veriyor), bu yüzden adlarının ayrışması şart: içerikleri
+    /// farklı ve biri diğerini ezerse ezilen tarayıcı köprüyü hiç göremez.
+    fn manifest_file_name(self) -> String {
+        match self {
+            Browser::Chromium => format!("{HOST_NAME}.json"),
+            Browser::Firefox => format!("{HOST_NAME}.firefox.json"),
+        }
+    }
+}
+
+/// Firefox uzantısının kimliği (`browser_specific_settings.gecko.id`).
+///
+/// Chrome kimliği uzantının açık anahtarından türüyor, yani kullanıcıdan
+/// alınmak zorunda. Firefox'ta kimliği **biz** yazıyoruz: sabit, bilinen ve
+/// paketten pakete değişmiyor — o yüzden kullanıcıya sormak gereksiz.
+///
+/// Bedeli açıkça yazalım: kimlik uzantının kendi beyanı olduğu için imzasız
+/// (geçici olarak yüklenmiş) başka bir uzantı da aynı kimliği yazıp köprüye
+/// ulaşabilir. Chrome'un kimliği sahtelenemez, Firefox'unki sahtelenebilir.
+/// Kapı yine de dar: yalnızca `http(s)` adresleri geçiyor ve köprü indirme
+/// eklemekten başka bir şey yapmıyor.
+pub const FIREFOX_EXTENSION_ID: &str = "muiget@muiget.app";
+
 /// Sürecin köprü kipinde mi başlatıldığını söyler.
 ///
 /// [`ADD_FLAG`] varsa asla köprü kipi değil: o çağrı çalışan pencereyi
 /// hedefliyor. Base64 yükü `:` içeremediği için ikisi pratikte karışamaz,
 /// yine de sıra açıkça yazıldı — yükün kodlaması ileride değişirse sessiz
 /// bir hataya dönüşmesin.
+///
+/// Firefox, Chrome'dan farklı olarak kaynağı **geçirmiyor**: köprüyü
+/// `<exe> <manifest yolu> <eklenti kimliği>` ile başlatıyor (kimlik Firefox
+/// 55'ten beri). Bu yüzden hem manifest dosyasının adı hem kendi eklenti
+/// kimliğimiz birer köprü işareti sayılıyor; yoksa Firefox her mesaj
+/// denemesinde uygulamanın penceresini açardı ve tek bir indirme bile gelmezdi.
+///
+/// İki işaretin de aranması bilinçli: Firefox'un manifesti nereden okuduğu
+/// kuruluma göre değişebiliyor, kimlik ise sabit.
 pub fn is_host_invocation(args: &[String]) -> bool {
     if args.iter().any(|a| a == ADD_FLAG) {
         return false;
     }
 
-    args.iter().any(|a| a == HOST_FLAG || a.starts_with(ORIGIN_PREFIX))
+    args.iter().any(|a| {
+        a == HOST_FLAG
+            || a.starts_with(ORIGIN_PREFIX)
+            || a == FIREFOX_EXTENSION_ID
+            || is_manifest_argument(a)
+    })
+}
+
+/// Argüman bizim native messaging manifestimizi mi gösteriyor?
+///
+/// Yalnızca dosya adına bakılıyor: Firefox manifesti kullanıcının seçtiği
+/// klasörden okuyabiliyor ve yolu sabitlemek elle kurulumu bozardı.
+fn is_manifest_argument(arg: &str) -> bool {
+    let ad = arg.rsplit(['/', '\\']).next().unwrap_or(arg);
+    ad == Browser::Chromium.manifest_file_name() || ad == Browser::Firefox.manifest_file_name()
 }
 
 /// Uzantıdan gelen mesajlar.
@@ -206,45 +265,64 @@ pub fn decode_payload(payload: &str) -> Option<DownloadRequest> {
     serde_json::from_slice(&ham).ok()
 }
 
-/// Chrome'un okuyacağı native messaging host manifesti.
+/// Tarayıcının okuyacağı native messaging host manifesti.
 ///
-/// `allowed_origins` **daraltıcı** bir liste: yalnızca burada kimliği yazan
-/// uzantı bu host'u başlatabiliyor. Boş bırakmak her uzantıya kapı açmak olurdu,
-/// o yüzden liste boşsa da geçerli bir (kimseyi kabul etmeyen) manifest üretiliyor.
-pub fn manifest_json(executable: &Path, allowed_extension_ids: &[String]) -> String {
-    let origins: Vec<String> = allowed_extension_ids
-        .iter()
-        .map(|id| format!("chrome-extension://{id}/"))
-        .collect();
-
-    let manifest = serde_json::json!({
+/// İzin listesi **daraltıcı**: yalnızca burada kimliği yazan uzantı bu host'u
+/// başlatabiliyor. Boş bırakmak her uzantıya kapı açmak olurdu, o yüzden liste
+/// boşsa da geçerli bir (kimseyi kabul etmeyen) manifest üretiliyor.
+///
+/// Alan adı tarayıcıya göre değişiyor: Chromium `allowed_origins` içinde tam
+/// bir kaynak adresi, Firefox `allowed_extensions` içinde çıplak kimlik
+/// bekliyor. Yanlış alanı yazmak sessizce "hiçbir uzantı yetkili değil"
+/// anlamına gelirdi.
+pub fn manifest_json(browser: Browser, executable: &Path, allowed_extension_ids: &[String]) -> String {
+    let mut manifest = serde_json::json!({
         "name": HOST_NAME,
         "description": "Muiget indirme yöneticisi köprüsü",
         "path": executable.to_string_lossy(),
         "type": "stdio",
-        "allowed_origins": origins,
     });
+
+    match browser {
+        Browser::Chromium => {
+            let origins: Vec<String> = allowed_extension_ids
+                .iter()
+                .map(|id| format!("{ORIGIN_PREFIX}{id}/"))
+                .collect();
+            manifest["allowed_origins"] = serde_json::json!(origins);
+        }
+        Browser::Firefox => {
+            manifest["allowed_extensions"] = serde_json::json!(allowed_extension_ids);
+        }
+    }
 
     serde_json::to_string_pretty(&manifest).unwrap_or_default()
 }
 
-/// Manifest dosyasının platforma göre duracağı yer.
+/// Manifest dosyasının platforma ve tarayıcıya göre duracağı yer.
 ///
 /// Windows'ta konum serbest — yol registry'ye yazılıyor
 /// (`HKCU\Software\Google\Chrome\NativeMessagingHosts\<ad>`). macOS ve Linux'ta
-/// Chrome sabit dizinlere bakıyor.
-pub fn manifest_path(config_dir: &Path) -> PathBuf {
+/// tarayıcılar sabit dizinlere bakıyor ve bu dizinler Chrome ile Firefox'ta
+/// farklı.
+pub fn manifest_path(browser: Browser, config_dir: &Path) -> PathBuf {
+    let ad = browser.manifest_file_name();
+
     if cfg!(target_os = "windows") {
-        config_dir.join(format!("{HOST_NAME}.json"))
-    } else if cfg!(target_os = "macos") {
-        dirs_home()
-            .join("Library/Application Support/Google/Chrome/NativeMessagingHosts")
-            .join(format!("{HOST_NAME}.json"))
-    } else {
-        dirs_home()
-            .join(".config/google-chrome/NativeMessagingHosts")
-            .join(format!("{HOST_NAME}.json"))
+        return config_dir.join(ad);
     }
+
+    let klasor = match (browser, cfg!(target_os = "macos")) {
+        (Browser::Chromium, true) => "Library/Application Support/Google/Chrome/NativeMessagingHosts",
+        (Browser::Chromium, false) => ".config/google-chrome/NativeMessagingHosts",
+        (Browser::Firefox, true) => "Library/Application Support/Mozilla/NativeMessagingHosts",
+        (Browser::Firefox, false) => ".mozilla/native-messaging-hosts",
+    };
+
+    // Firefox manifesti adıyla değil **host adıyla** aranıyor: sabit dizinlerde
+    // dosyanın adı `com.muiget.host.json` olmak zorunda. Ad ayrımı yalnızca
+    // Windows'ta, iki manifestin aynı klasörü paylaşması yüzünden gerekliydi.
+    dirs_home().join(klasor).join(format!("{HOST_NAME}.json"))
 }
 
 fn dirs_home() -> PathBuf {
@@ -537,6 +615,7 @@ mod tests {
     #[test]
     fn manifest_izin_verilen_uzantilari_listeliyor() {
         let manifest = manifest_json(
+            Browser::Chromium,
             Path::new("C:\\Program Files\\Muiget\\muiget.exe"),
             &["abcdefghijklmnopabcdefghijklmnop".to_string()],
         );
@@ -548,9 +627,68 @@ mod tests {
 
     #[test]
     fn izin_listesi_bos_manifest_kimseyi_kabul_etmiyor() {
-        let manifest = manifest_json(Path::new("/usr/bin/muiget"), &[]);
+        let manifest = manifest_json(Browser::Chromium, Path::new("/usr/bin/muiget"), &[]);
         let cozulen: serde_json::Value = serde_json::from_str(&manifest).unwrap();
         assert_eq!(cozulen["allowed_origins"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn firefox_manifesti_ciplak_kimlik_yaziyor() {
+        let manifest = manifest_json(
+            Browser::Firefox,
+            Path::new("/usr/bin/muiget"),
+            &[FIREFOX_EXTENSION_ID.to_string()],
+        );
+        let cozulen: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+
+        // Firefox `allowed_extensions` okuyor; `allowed_origins` yazmak sessizce
+        // "kimse yetkili değil" demek olurdu.
+        assert!(cozulen.get("allowed_origins").is_none());
+        assert_eq!(
+            cozulen["allowed_extensions"].as_array().unwrap(),
+            &vec![serde_json::json!(FIREFOX_EXTENSION_ID)]
+        );
+        // Kaynak öneki Firefox kimliğine yapıştırılmamalı.
+        assert!(!manifest.contains(ORIGIN_PREFIX));
+    }
+
+    #[test]
+    fn iki_manifest_ayni_klasorde_cakismiyor() {
+        // Windows'ta ikisi de yapılandırma klasörüne yazılıyor; adları aynı
+        // olsaydı ikinci yazım birincisini ezer ve o tarayıcı köprüyü göremezdi.
+        let klasor = Path::new("C:\\Users\\x\\AppData\\Roaming\\Muiget");
+        assert_ne!(
+            manifest_path(Browser::Chromium, klasor),
+            manifest_path(Browser::Firefox, klasor)
+        );
+    }
+
+    #[test]
+    fn firefox_manifest_yolu_kopru_kipini_aciyor() {
+        // Firefox'un gerçekte verdiği argümanlar: manifest yolu + eklenti kimliği.
+        let args = vec![
+            "muiget.exe".to_string(),
+            "C:\\Users\\x\\AppData\\Roaming\\Muiget\\com.muiget.host.firefox.json".to_string(),
+            FIREFOX_EXTENSION_ID.to_string(),
+        ];
+        assert!(is_host_invocation(&args));
+
+        // Manifest başka bir yoldan okunmuş olsa bile kimlik yetiyor.
+        let args = vec!["muiget".to_string(), FIREFOX_EXTENSION_ID.to_string()];
+        assert!(is_host_invocation(&args));
+
+        // Linux/macOS'ta dosyanın adı host adının kendisi.
+        let args = vec![
+            "muiget".to_string(),
+            "/home/x/.mozilla/native-messaging-hosts/com.muiget.host.json".to_string(),
+        ];
+        assert!(is_host_invocation(&args));
+    }
+
+    #[test]
+    fn baska_json_argumani_kopru_kipi_degil() {
+        let args = vec!["muiget.exe".to_string(), "C:\\bir\\ayarlar.json".to_string()];
+        assert!(!is_host_invocation(&args));
     }
 
     #[test]

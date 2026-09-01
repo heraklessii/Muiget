@@ -190,10 +190,52 @@ fn normalize_proxy(raw: &str) -> String {
     temiz.to_string()
 }
 
-/// Chrome uzantı kimliği: tam 32 karakter, yalnızca `a`–`p` arası küçük harf.
-/// (Chrome, uzantının açık anahtarının SHA-256 özetini bu alfabeye çeviriyor.)
+/// Uzantı kimliği geçerli mi? Chrome/Edge ya da Firefox biçimlerinden biri
+/// olması yeterli (karar #31).
 pub fn gecerli_uzanti_kimligi(id: &str) -> bool {
+    chromium_uzanti_kimligi(id) || firefox_uzanti_kimligi(id)
+}
+
+/// Chrome/Edge uzantı kimliği: tam 32 karakter, yalnızca `a`–`p` arası küçük
+/// harf. (Chrome, uzantının açık anahtarının SHA-256 özetini bu alfabeye
+/// çeviriyor; bu yüzden kimlik sahtelenemiyor.)
+pub fn chromium_uzanti_kimligi(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| (b'a'..=b'p').contains(&b))
+}
+
+/// Firefox uzantı kimliği: `ad@alan` ya da `{GUID}` biçimi.
+///
+/// Firefox kimliği uzantının kendi beyanı (`browser_specific_settings.gecko.id`)
+/// olduğu için türetilmiş bir yapısı yok; doğrulama biçim kontrolünden ibaret.
+/// Yine de gerekli: bu değer manifeste yazılıyor ve boşluk/tırnak içeren bir
+/// dize manifesti kullanılamaz hâle getirirdi.
+pub fn firefox_uzanti_kimligi(id: &str) -> bool {
+    if id.is_empty() || id.len() > 128 || id.chars().any(|c| c.is_whitespace()) {
+        return false;
+    }
+
+    if id.starts_with('{') && id.ends_with('}') {
+        let ic = &id[1..id.len() - 1];
+        return ic.len() == 36
+            && ic.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+            && ic.matches('-').count() == 4;
+    }
+
+    // `ad@alan`: tek `@`, iki yanı da dolu ve alan tarafında en az bir nokta —
+    // "muiget@" ya da "@app" gibi yarım kimlikler manifeste girmemeli.
+    match id.split_once('@') {
+        Some((ad, alan)) => {
+            !ad.is_empty()
+                && alan.contains('.')
+                && !alan.starts_with('.')
+                && !alan.ends_with('.')
+                && !alan.contains('@')
+                && id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '.' | '-' | '_' | '+'))
+        }
+        None => false,
+    }
 }
 
 #[cfg(test)]
@@ -308,6 +350,28 @@ mod tests {
         assert!(!gecerli_uzanti_kimligi(&"1".repeat(32)));
         // Manifest'e enjekte edilmeye çalışılan değer
         assert!(!gecerli_uzanti_kimligi("aaaa/\", \"allowed_origins\": [\"*\"]"));
+    }
+
+    #[test]
+    fn firefox_kimligi_dogrulaniyor() {
+        assert!(gecerli_uzanti_kimligi("muiget@muiget.app"));
+        assert!(gecerli_uzanti_kimligi("bir-uzanti@ornek.com.tr"));
+        assert!(gecerli_uzanti_kimligi("{d4a1b2c3-1111-2222-3333-abcdefabcdef}"));
+
+        // Yarım kimlikler
+        assert!(!gecerli_uzanti_kimligi("muiget@"));
+        assert!(!gecerli_uzanti_kimligi("@muiget.app"));
+        assert!(!gecerli_uzanti_kimligi("muiget@alan")); // nokta yok
+        assert!(!gecerli_uzanti_kimligi("a@b@c.com"));
+        // Manifest'i bozacak karakterler
+        assert!(!gecerli_uzanti_kimligi("a@b.com\", \"x\": \"y"));
+        assert!(!gecerli_uzanti_kimligi("a b@c.com"));
+        // GUID biçimi ama içi bozuk
+        assert!(!gecerli_uzanti_kimligi("{kisa-guid}"));
+
+        // Karışmıyorlar: her kimlik tek bir tarayıcıya ait.
+        assert!(!chromium_uzanti_kimligi("muiget@muiget.app"));
+        assert!(!firefox_uzanti_kimligi("abcdefghijklmnopabcdefghijklmnop"));
     }
 
     #[test]

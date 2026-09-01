@@ -159,9 +159,21 @@ istisnalar `docs/worklog.md`'de not düşülerek yapılabilir). Kutucuk işaretl
 - [x] Uzantı kimliği doğrulama (32 karakter, a–p) — hem Rust hem arayüz tarafında
 - [ ] **Gerçek Chrome ile uçtan uca deneme** — protokol birim testli ama
       Chrome'un host'u gerçekten başlattığı senaryo elle denenmedi
-- [ ] Firefox uyarlaması (native messaging protokolü aynı, manifest farklı)
-- [ ] Edge uyarlaması (registry kaydı zaten yazılıyor, uzantı kimliği farklı)
+- [x] **Firefox uyarlaması** (karar #31). Ayrı köprü manifesti
+      (`allowed_extensions` + `HKCU\Software\Mozilla\…`), Firefox'un verdiği
+      argümanların (manifest yolu + eklenti kimliği) köprü kipi olarak
+      tanınması, sabit eklenti kimliği (`muiget@muiget.app`) ve
+      `tools/uzanti-paketle.js` ile türetilen Firefox paketi.
+      **Denenmedi:** gerçek bir Firefox kurulumunda çalıştırılmadı.
+- [x] **Edge uyarlaması.** Chromium olduğu için manifest ve kimlik biçimi
+      Chrome ile aynı; registry kaydı zaten yazılıyordu. Belgeler ve arayüz
+      metni artık Edge'i de adıyla anıyor.
+- [x] **Uzantı paketleyici** (`npm run uzanti`). Tek kaynaktan Chrome ve
+      Firefox paketleri; `--magaza` bayrağı YouTube yakalamasını kapatıyor ve
+      sabiti bulamazsa hata veriyor.
 - [ ] Chrome Web Store yayını
+- [ ] AMO (addons.mozilla.org) yayını — kalıcı kurulum imzalama istiyor;
+      geçici eklenti Firefox kapanınca kalkıyor.
 
 ## Faz 6 — Medya Özel ve Güven Katmanı 🟡 (HLS/DASH ve checksum bitti)
 
@@ -298,10 +310,14 @@ Kod yazarken ortaya çıkan, bir faza tam oturmayan işler:
      hizalaması yerel testte doğru, ama sağlayıcıların bu alanı nasıl yazdığı
      çeşitlilik gösteriyor.
 
-3. **Tarayıcı kapsamı** — Firefox/Edge uyarlaması (native messaging protokolü
-   aynı, yalnızca manifest farklı) ve Chrome Web Store yayını. Ucuz kazanç:
-   IDM'in üstünlüğü hızda değil yakalamada. Video yakalama geldiğine göre
-   uzantının değeri de arttı.
+3. **Tarayıcı kapsamı** — kod tarafı 14. oturumda bitti (karar #31): Firefox
+   ve Edge destekleniyor, paketler `npm run uzanti` ile üretiliyor. Kalan iki
+   iş kod değil:
+   - **Firefox'ta gerçek deneme.** `about:debugging` → geçici eklenti yükle →
+     köprüyü kur → bir bağlantı gönder. Chrome için aynı doğrulama 8. oturumda
+     yapıldı; Firefox tarafı yalnızca testli.
+   - **Mağaza yayınları.** Chrome Web Store (mağaza derlemesi:
+     `npm run uzanti:magaza`) ve AMO. AMO'da kalıcı kurulum imzalama istiyor.
 
 4. **Faz 4 (torrent)** — en büyük yeni yüzey. IDM'de torrent yok, yani rekabet
    açısından 2. ve 3. maddeden sonra geliyor.

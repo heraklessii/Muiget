@@ -123,8 +123,9 @@ export function engineDefaults(): Promise<ManagerConfig> {
   return invoke<ManagerConfig>('engine_defaults');
 }
 
-export function installNativeHost(extensionIds: string[]): Promise<string> {
-  return invoke<string>('install_native_host', { extensionIds });
+/** Köprüyü tarayıcılara tanıtır; yazılan manifest yollarını döner (karar #31). */
+export function installNativeHost(extensionIds: string[]): Promise<string[]> {
+  return invoke<string[]>('install_native_host', { extensionIds });
 }
 
 export function revealInFolder(path: string): Promise<void> {

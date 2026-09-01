@@ -7,8 +7,8 @@ edebilmek.
 ## Proje Nedir
 
 **Muiget**, açık kaynaklı (Apache 2.0), IDM/FDM tarzı bir indirme yöneticisi.
-HTTP/HTTPS çoklu-bağlantılı (segmented) indirme, torrent desteği ve bir Chrome
-uzantısı ile tarayıcıdan yakalama içerecek. Hedef: IDM'e gerçek, ücretsiz,
+HTTP/HTTPS çoklu-bağlantılı (segmented) indirme, torrent desteği ve bir tarayıcı
+uzantısı (Chrome/Edge/Firefox) ile tarayıcıdan yakalama içerecek. Hedef: IDM'e gerçek, ücretsiz,
 şeffaf bir alternatif olmak — kapalı kaynak değil, ücretli değil.
 
 Geliştirici: İlker (solo developer). Muitoon platformunun da sahibi/geliştiricisi,
@@ -33,12 +33,12 @@ aşmayı hedefliyorsa reddedilmeli ve bu dosyadaki sınır hatırlatılmalı.
 | Akış videosu | Kendi kodumuz (`src/media/`) + `aes`/`cbc` | m3u8/MPD ayrıştırma ve parça birleştirme dış bağımlılık istemiyor; AES için RustCrypto |
 | Kap dönüşümü | ffmpeg — **isteğe bağlı** dış araç | Gömmek paketi on katına çıkarırdı; yalnızca `.ts`→`.mp4` ve ses/video birleştirme için gerekli (karar #25) |
 | Frontend UI | React + Vite + TypeScript | Tauri ile birinci sınıf entegrasyon |
-| Extension | Chrome MV3 | İlker'in Muitoon extension deneyimiyle örtüşüyor |
-| Extension ↔ App köprüsü | Native Messaging (stdin/stdout, length-prefixed JSON) | Chrome'un desteklediği tek güvenli yerel IPC yolu |
+| Extension | MV3 — Chrome/Edge + Firefox | İlker'in Muitoon extension deneyimiyle örtüşüyor; Firefox paketi Chrome manifestinden türetiliyor (karar #31) |
+| Extension ↔ App köprüsü | Native Messaging (stdin/stdout, length-prefixed JSON) | Tarayıcıların desteklediği tek güvenli yerel IPC yolu; Firefox aynı protokolü konuşuyor (karar #31) |
 
 ## Lisans
 
-Apache License 2.0 — hem ana uygulama hem Chrome extension için. Her yeni
+Apache License 2.0 — hem ana uygulama hem tarayıcı uzantısı için. Her yeni
 dosyanın başına lisans header'ı eklenmeyecek (Apache 2.0 bunu zorunlu kılmıyor,
 NOTICE dosyası yeterli) — sade tutulacak.
 
@@ -59,7 +59,8 @@ muiget/
 ├── index.html                  ✅
 ├── .github/workflows/          ✅ ci.yml, release.yml, pages.yml
 ├── site/                       ✅ GitHub Pages tanıtım sayfası (index.html)
-├── tools/                      ✅ ikon-uret.js (uygulama ikonu üretici)
+├── tools/                      ✅ ikon-uret.js (uygulama ikonu üretici),
+│                                  uzanti-paketle.js (Chrome + Firefox paketi)
 ├── docs/
 │   ├── ekran-goruntusu.png     ✅ Uygulamanın kendi penceresinden
 │   ├── project_overview.md     ✅ Ürün vizyonu, hedef kitle, rakip analizi
@@ -118,15 +119,21 @@ muiget/
 │       │   └── mux.rs             # ffmpeg bulma ve çağırma
 │       ├── extension_bridge/   ✅ Faz 5
 │       │   ├── mod.rs             # İstek işleme, host kaydı
-│       │   └── native_host.rs     # Chrome native messaging protokolü
+│       │   └── native_host.rs     # Native messaging protokolü + tarayıcıya
+│       │                          #   göre manifest (Chromium / Firefox)
 │       └── torrent/            ⬜ Faz 4
 │           └── engine.rs          # librqbit sarmalayıcı
-└── extension/                  ✅ Faz 5 — Chrome MV3 uzantısı
-    ├── manifest.json           ✅
+├── dist-extension/             ✅ Üretilmiş uzantı paketleri — DEPODA
+│   ├── chrome/                    # Kullanıcı klonlayıp doğrudan yükleyebilsin
+│   └── firefox/                   # diye commit'leniyor; güncelliğini CI kontrol
+│                                  # ediyor (npm run uzanti → git diff boş olmalı)
+└── extension/                  ✅ Faz 5 — MV3 uzantısı (Chrome/Edge/Firefox)
+    ├── manifest.json           ✅ Tek kaynak; Firefox'unki buradan türetiliyor
     ├── background.js           ✅ Sağ tık, köprü, indirme devralma
+    │                              (modül değil: Firefox'ta olay sayfası)
     ├── popup.html/.js/.css     ✅ Sayfa taraması, ayarlar
     ├── icons/                  ✅
-    └── README.md               ✅ Kurulum ve izin açıklamaları
+    └── README.md               ✅ Üç tarayıcı için kurulum, izin açıklamaları
 ```
 
 ## Geliştirme Komutları
@@ -136,7 +143,9 @@ npm run dev       # sadece frontend (Vite, localhost:1420)
 npm run build     # tsc + vite build → dist/
 npm run tauri dev # tam uygulama (Rust + pencere)
 cargo check       # src-tauri/ içinde, hızlı Rust doğrulaması
-cargo test        # 291 birim + 41 uçtan uca test
+cargo test        # 300 birim + 41 uçtan uca test
+npm run uzanti    # extension/ → dist-extension/{chrome,firefox}
+npm run uzanti:magaza  # mağaza derlemesi: YouTube yakalaması kapalı (#27)
 ```
 
 Uçtan uca testler elle yazılmış küçük HTTP sunucuları kaldırıp motoru onlara
@@ -220,6 +229,13 @@ Detaylar için `docs/decisions.md`. Kısa özet:
 19. **İlerleme olayları biriktiriliyor**: chunk başına değil, 256 KB ya da
     100 ms'de bir. Tek tüketici hız ölçer; ilerlemenin kaynağı `downloaded`
     atomiği (karar #30).
+20. **Firefox desteği**: protokol aynı, ayrışan üç nokta karşılandı — ayrı
+    köprü manifesti (`allowed_extensions`, ayrı dosya adı, `HKCU\Software\
+    Mozilla\…`), Firefox'un verdiği argümanların (manifest yolu + eklenti
+    kimliği) köprü kipi sayılması ve sabit eklenti kimliği
+    (`muiget@muiget.app`, kullanıcıdan istenmiyor). Uzantı paketleri
+    `tools/uzanti-paketle.js` ile **tek kaynaktan türetiliyor**; ikinci bir
+    elle yazılmış manifest yok (karar #31).
 
 ## Çalışma Tarzı Notları
 
@@ -234,12 +250,13 @@ Detaylar için `docs/decisions.md`. Kısa özet:
 ## Sıradaki Adım
 
 **Faz 0, 1, 2, 3, 5 ve Faz 6'nın çekirdeği tamamlandı.** Çalışan bir segmentli
-indirme motoru, **HLS/DASH video indirme**, tam bir arayüz ve Chrome uzantısı
-var. 332 test geçiyor. Uygulama gerçek penceresinde uçtan uca doğrulandı (8 MB
-dosya, 8 paralel segment, SHA-256 birebir aynı) ve 10. oturumda akış indirmesi
-de aynı yöntemle doğrulandı (yerel VOD playlisti, parçalar paralel indi, SHA-256
-birebir). Chrome köprüsü de Chrome'un gerçek çağrısıyla doğrulandı; son yayın
-v0.1.4.
+indirme motoru, **HLS/DASH video indirme**, tam bir arayüz ve **Chrome/Edge +
+Firefox** uzantısı var. 341 test geçiyor. Uygulama gerçek penceresinde uçtan
+uca doğrulandı (8 MB dosya, 8 paralel segment, SHA-256 birebir aynı) ve
+10. oturumda akış indirmesi de aynı yöntemle doğrulandı (yerel VOD playlisti,
+parçalar paralel indi, SHA-256 birebir). Chrome köprüsü de Chrome'un gerçek
+çağrısıyla doğrulandı — **Firefox köprüsü denenmedi**, yalnızca testli; son
+yayın v0.1.5.
 
 IDM'e yaklaştıran eklemeler: host kotasının indirmeler arasında adil
 bölüşülmesi (karar #17), kategori klasörleri (#18), vekil sunucu (#19),
@@ -274,15 +291,19 @@ Sıradaki öncelikler (`docs/tasks.md` → "Sıradaki"):
    ffmpeg'le çalıştırılmadı (bu makinede ffmpeg yok). **Altyazı da bu listede:**
    13. oturumda eklendi, yerel sunucuya karşı altı uçtan uca testi var, gerçek
    bir sağlayıcıya karşı hiç çalıştırılmadı.
-3. **Tarayıcı kapsamı** — Firefox/Edge uyarlaması + Chrome Web Store yayını.
-   Rekabetin kazanıldığı yer hız değil yakalama; video yakalama geldiğine göre
-   uzantının değeri de arttı.
+3. **Tarayıcı kapsamı** — kod tarafı 14. oturumda bitti (karar #31): Firefox
+   ve Edge destekleniyor, paketler `npm run uzanti` ile üretiliyor. Kalan iki
+   iş kod değil: Firefox'ta gerçek deneme ve mağaza yayınları (Chrome Web
+   Store + AMO).
 4. **Faz 4 (torrent)** — IDM'de zaten yok; 2 ve 3'ten sonra.
 
 **İlker'e kalan (kod dışı):**
-- Chrome'da `chrome://extensions` → **Paketlenmemiş öğe yükle** → `extension/`.
-  Köprünün geri kalanı (host kaydı, kimlik, uçtan uca indirme) 8. oturumda
-  doğrulandı; dosya seçme penceresi otomatikleştirilemiyor.
+- Tarayıcıya uzantıyı yükleme: önce `npm run uzanti`, sonra Chrome/Edge'de
+  `chrome://extensions` → **Paketlenmemiş öğe yükle** → `dist-extension/chrome`,
+  Firefox'ta `about:debugging` → **Geçici Eklenti Yükle** →
+  `dist-extension/firefox/manifest.json`. Köprünün geri kalanı (host kaydı,
+  kimlik, uçtan uca indirme) Chrome'da 8. oturumda doğrulandı; dosya seçme
+  penceresi otomatikleştirilemiyor. **Firefox tarafı hiç denenmedi.**
 - **Kod imzalama sertifikası.** Paketler imzasız olduğu sürece Windows
   SmartScreen ve macOS Gatekeeper uyarı gösteriyor; indirenlerin çoğu orada
   duruyor. Kodla çözülmüyor.

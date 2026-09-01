@@ -254,21 +254,24 @@ pub fn engine_defaults() -> ManagerConfig {
     ManagerConfig::default()
 }
 
-/// Chrome/Edge'e native messaging host'unu tanıtır.
+/// Chrome/Edge ve Firefox'a native messaging host'unu tanıtır (karar #31).
 ///
 /// Kullanıcı ayarlardan açıkça istediğinde çağrılıyor — kurulumda sessizce
 /// tarayıcıya kaydolmak, bir indirme yöneticisi için fazla ileri giderdi.
-/// Dönen değer manifest dosyasının yolu: otomatik registry kaydı başarısız
-/// olursa kullanıcı bu yolu elle tanıtabilir.
+/// Dönen değer yazılan manifest dosyalarının yolları: otomatik registry kaydı
+/// başarısız olursa kullanıcı bu yolları elle tanıtabilir.
 #[tauri::command]
-pub fn install_native_host(extension_ids: Vec<String>, state: State<'_, AppState>) -> Result<String> {
+pub fn install_native_host(
+    extension_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>> {
     let exe = std::env::current_exe()
         .map_err(|e| DownloadError::Other(format!("uygulama yolu bulunamadı: {e}")))?;
 
-    let yol = crate::extension_bridge::install_host(&state.config_dir, &exe, &extension_ids)
+    let yollar = crate::extension_bridge::install_host(&state.config_dir, &exe, &extension_ids)
         .map_err(DownloadError::Io)?;
 
-    Ok(yol.to_string_lossy().into_owned())
+    Ok(yollar.iter().map(|y| y.to_string_lossy().into_owned()).collect())
 }
 
 /// İnen dosyanın özetini hesaplar (karar #21).

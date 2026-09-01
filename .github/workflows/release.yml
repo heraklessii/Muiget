@@ -95,7 +95,13 @@ jobs:
             **macOS (universal — Apple Silicon + Intel)**
             - `.dmg`
 
-            **Bu bir ön sürüm.** İndirme motoru, arayüz ve Chrome uzantısı
+            **Tarayıcı uzantısı** (Chrome, Edge, Firefox)
+            - `muiget-uzanti-chrome-*.zip` — açıp `chrome://extensions` →
+              Geliştirici modu → **Paketlenmemiş öğe yükle**
+            - `muiget-uzanti-firefox-*.zip` — açıp `about:debugging` →
+              **Geçici Eklenti Yükle** → `manifest.json`
+
+            **Bu bir ön sürüm.** İndirme motoru, arayüz ve tarayıcı uzantısı
             çalışıyor ve otomatik testlerle doğrulanıyor; ancak uygulama geniş
             çapta sahada denenmedi ve torrent desteği henüz yok. Ne yaptığı ve
             **ne yapmadığı** için [README](https://github.com/heraklessii/Muiget#ne-yapmaz).
@@ -112,3 +118,38 @@ jobs:
           # Ön sürüm olarak işaretleniyor: uygulama gerçek dünyada henüz geniş
           # çapta denenmedi ve "Latest" rozetini taşımamalı.
           prerelease: true
+
+  # Tarayıcı uzantısı, kurulum paketlerinden ayrı: Tauri onu derlemiyor.
+  # Zip'lenip aynı yayına ekleniyor ki kullanıcı depoyu klonlamadan indirip
+  # "Paketlenmemiş öğe yükle" ile kurabilsin.
+  uzanti:
+    name: Tarayıcı uzantısı paketleri
+    needs: release
+    # Etiketsiz (workflow_dispatch) çalıştırmada yüklenecek bir yayın yok.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Depodaki paketler CI'da zaten güncel tutuluyor (ci.yml → "uzanti"),
+      # yine de yayına giren zip kaynaktan üretiliyor: yayın, depodaki bir
+      # dosyanın unutulmuş olmasına bağlı kalmasın.
+      - name: Paketleri üret
+        run: npm run uzanti
+
+      - name: Zip'le
+        working-directory: dist-extension
+        run: |
+          zip -r ../muiget-uzanti-chrome-${{ github.ref_name }}.zip chrome
+          zip -r ../muiget-uzanti-firefox-${{ github.ref_name }}.zip firefox
+
+      - name: Yayına yükle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.ref_name }} muiget-uzanti-*.zip --clobber

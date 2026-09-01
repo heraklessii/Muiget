@@ -8,7 +8,7 @@ anahtarı satın alması gerekmeyen, kodunu herkesin okuyup değiştirebildiği 
 [![Status](https://img.shields.io/badge/durum-geli%C5%9Ftirme%20a%C5%9Famas%C4%B1nda-orange.svg)](docs/tasks.md)
 
 > ⚠️ **Bu proje erken geliştirme aşamasında.** İndirme motoru, video akışı
-> indirme, arayüz ve Chrome uzantısı çalışıyor (332 test geçiyor) ama uygulama
+> indirme, arayüz ve tarayıcı uzantısı çalışıyor (341 test geçiyor) ama uygulama
 > geniş çapta sahada denenmedi ve torrent desteği henüz eklenmedi. İlerlemeyi
 > [`docs/tasks.md`](docs/tasks.md) üzerinden takip edebilirsiniz.
 
@@ -53,7 +53,8 @@ anahtarı satın alması gerekmeyen, kodunu herkesin okuyup değiştirebildiği 
   hizalanır — aksi hâlde çoğu oynatıcı dosyayı hiç açmaz. Dil tercihine uyan
   altyazı seçilir; Ayarlar'dan "hepsi" ya da "indirme" yapılabilir. Altyazının
   inmemesi videoyu hiçbir zaman düşürmez.
-- **Tarayıcı entegrasyonu** — Chrome uzantısı ile sağ tık → "Muiget ile indir",
+- **Tarayıcı entegrasyonu** — Chrome, Edge ve Firefox uzantısı ile sağ tık →
+  "Muiget ile indir",
   sayfa taraması, **video yakalama** (sayfadaki HLS/DASH yayınlarını bulur;
   isteğe bağlı izin, varsayılan kapalı) ve isteğe bağlı indirme devralma
   ([kurulum](extension/README.md)).
@@ -128,6 +129,26 @@ issue olarak bildirin.
 Paketler **imzasız**: Windows SmartScreen ve macOS Gatekeeper uyarı gösterecek.
 Kod imzalama sertifikası henüz yok.
 
+### Tarayıcı uzantısı
+
+Uzantı henüz mağazalarda değil. İki yoldan da kurulabilir — hazır paketler
+depoda [`dist-extension/`](dist-extension) altında duruyor ve her sürümde
+zip olarak yayına da ekleniyor:
+
+| Tarayıcı | Adımlar |
+|---|---|
+| Chrome / Edge | `chrome://extensions` (Edge: `edge://extensions`) → **Geliştirici modu** → **Paketlenmemiş öğe yükle** → `dist-extension/chrome` |
+| Firefox | `about:debugging#/runtime/this-firefox` → **Geçici Eklenti Yükle** → `dist-extension/firefox/manifest.json` |
+
+Sonra masaüstü uygulamasında **Ayarlar → Tarayıcı uzantısı**: Chrome/Edge
+kullanıyorsanız uzantı kartındaki 32 harflik kimliği yapıştırın, yalnızca
+Firefox kullanıyorsanız kutuyu boş bırakın → **Köprüyü kur**.
+
+Ayrıntılar ve izin açıklamaları: [`extension/README.md`](extension/README.md).
+
+> Firefox'ta geçici eklenti tarayıcı kapanınca kalkar (kalıcı kurulum imzalama
+> istiyor). Firefox tarafı henüz sahada denenmedi.
+
 ### Gereksinimler
 
 | Araç | Sürüm | Not |
@@ -159,7 +180,7 @@ npm run tauri build  # üretim binary'si
 | Akış videosu | Kendi kodumuz (m3u8/MPD) + ffmpeg (isteğe bağlı) |
 | Torrent motoru | librqbit |
 | Frontend | React + Vite + TypeScript |
-| Tarayıcı uzantısı | Chrome MV3 + Native Messaging |
+| Tarayıcı uzantısı | MV3 (Chrome/Edge + Firefox) + Native Messaging |
 
 Bu seçimlerin gerekçeleri için: [`docs/decisions.md`](docs/decisions.md).
 
@@ -172,13 +193,14 @@ Bu seçimlerin gerekçeleri için: [`docs/decisions.md`](docs/decisions.md).
 | 2 | Adaptif optimizasyon, bant genişliği kuralları | ✅ Tamamlandı |
 | 3 | Tauri UI (React) | ✅ Tamamlandı |
 | 4 | Torrent entegrasyonu | ⚪ Ertelendi |
-| 5 | Chrome uzantısı | ✅ Tamamlandı |
+| 5 | Tarayıcı uzantısı (Chrome/Edge/Firefox) | ✅ Tamamlandı |
 | 6 | HLS/DASH video, altyazı, checksum, opsiyonel virüs taraması | 🟡 Video, altyazı ve checksum bitti |
 | 7 | Plugin sistemi, istatistikler, katkı rehberi | ⚪ Bekliyor |
 
-**Bilinen eksikler:** torrent desteği henüz yok; video sitelerinden HLS/DASH
-(m3u8) akışı indirilemiyor; yalnızca Chrome uzantısı var (Firefox/Edge yok ve
-uzantı mağazada değil); açılışta yalnızca varsayılan indirme klasörü taranıyor
+**Bilinen eksikler:** torrent desteği henüz yok; HLS/DASH indirme gerçek bir
+video sitesine karşı denenmedi (testler yerel sunucuya karşı); uzantı henüz
+mağazalarda değil ve Firefox tarafı sahada denenmedi; açılışta yalnızca
+varsayılan indirme klasörü taranıyor
 (başka klasörler için Ayarlar → "Klasörü tara"); hız, gerçek dünyada henüz
 başka bir indirme yöneticisiyle karşılaştırılmadı; kurulum paketleri imzasız.
 
@@ -199,6 +221,7 @@ Katkı verirken okunması gereken dosyalar:
 
 ## Lisans
 
-[Apache License 2.0](LICENSE) — hem masaüstü uygulaması hem Chrome uzantısı için.
+[Apache License 2.0](LICENSE) — hem masaüstü uygulaması hem tarayıcı uzantısı
+için.
 
 Üçüncü parti bileşenlerin lisans bildirimleri: [`NOTICE`](NOTICE).

@@ -1075,3 +1075,77 @@ byte kaybolmuyor.
 sahada ölçülmedi ve "şu kadar hızlandı" diye bir iddia yok. Gerekçe aritmetik:
 saniyede on binlerce kanal mesajı ve o kadar görev uyandırması, karşılığında
 hiçbir bilgi kazandırmıyordu.
+
+---
+
+## 31. Firefox desteği: tek kaynak, iki manifest, türetilmiş paket
+
+**Bağlam:** Köprü bugüne kadar yalnızca Chromium'u tanıyordu. Edge zaten
+çalışıyordu (aynı manifest, aynı `chrome-extension://` kaynağı, registry kaydı
+da yazılıyordu); eksik olan Firefox'tu. `docs/tasks.md`'de "ucuz kazanç" diye
+duruyordu ve öyle de çıktı — protokol aynı, ayrışan yer yalnızca **manifest ve
+başlatma biçimi**.
+
+**Karar:** Firefox destekleniyor. Ayrışan üç nokta tek tek karşılandı:
+
+1. **Köprü manifesti ikiye çıktı.** Chromium `allowed_origins` içinde
+   `chrome-extension://<kimlik>/` bekliyor, Firefox `allowed_extensions` içinde
+   çıplak kimlik. Windows'ta ikisi de yapılandırma klasörüne yazıldığı için
+   dosya adları da ayrıştı (`com.muiget.host.json` /
+   `com.muiget.host.firefox.json`); Linux/macOS'ta tarayıcıların sabit
+   dizinleri zaten ayrı, dosyanın adı ikisinde de host adı olmak zorunda.
+   Registry kökü de ayrı: `HKCU\Software\Mozilla\NativeMessagingHosts`.
+2. **Köprü kipi tespiti.** Chrome köprüyü `<exe> chrome-extension://<id>/ …`
+   ile başlatıyor; Firefox kaynağı hiç geçirmiyor, yerine **manifest yolunu**
+   ve (Firefox 55'ten beri) **eklenti kimliğini** veriyor. `is_host_invocation`
+   ikisini de tanıyor. Tanımasaydı Firefox'un her mesaj denemesi köprü yerine
+   uygulamanın penceresini açardı ve tek bir indirme bile gelmezdi.
+3. **Firefox kimliği kullanıcıdan istenmiyor.** Chrome kimliği uzantının açık
+   anahtarının özeti, yani kuruluma göre değişiyor ve sorulmak zorunda.
+   Firefox'ta kimliği paketi üretirken biz yazıyoruz (`muiget@muiget.app`), o
+   yüzden köprü manifestine kendiliğinden ekleniyor ve ayarlardaki kutu boş
+   bırakılabiliyor.
+
+**Uzantı paketleri türetiliyor, elle çoğaltılmıyor.** `tools/uzanti-paketle.js`
+`extension/` klasöründen `dist-extension/chrome` ve `dist-extension/firefox`
+üretiyor. İkinci bir `manifest.firefox.json` **bilerek yok**: iki manifesti
+elle eşit tutmak, her değişiklikte kaçırılabilecek bir adım demekti — uzantının
+sürüm numarası tam da bu yüzden üç yayın boyunca geride kalmıştı. Firefox
+manifesti Chrome manifestinden türetiliyor; ayrıştıkları yerler betikte tek tek
+yazılı (olay sayfası, `browser_specific_settings`, `minimum_chrome_version`in
+çıkarılması).
+
+Aynı betik `--magaza` bayrağıyla doğrudan medya yakalamayı kapatıyor
+(karar #27). Sabit bulunamazsa betik **hata veriyor**: sessizce geçmek,
+YouTube yakalaması açık bir paketi Web Store'a göndermek olurdu.
+
+**`background.js` artık modül değil.** Chrome'da servis çalışanı, Firefox'ta
+olay sayfası olarak yükleniyor (Firefox MV3'te arka plan servis çalışanı yok) ve
+olay sayfası bağlamında `export` doğrudan bir sözdizimi hatası. Dosyadaki
+`export`lar hiçbir yerden `import` edilmiyordu, kaldırıldılar. Tarayıcı API'si
+tek bir sabitin arkasında: `const api = globalThis.browser ?? globalThis.chrome`
+— Firefox'ta Promise döndüren ad `browser`, Chrome/Edge'de `chrome`.
+
+**En düşük Firefox 128.** `optional_host_permissions` Firefox 128'de geldi.
+Daha aşağı inmek, uzantıyı yükleyip video yakalamanın sessizce çalışmadığı bir
+tarayıcıya izin vermek olurdu.
+
+**Kabul edilen bedel:** Firefox kimliği uzantının kendi beyanı olduğu için
+sahtelenebiliyor — geçici olarak yüklenmiş başka bir eklenti aynı kimliği
+yazıp köprüye ulaşabilir. Chrome'da bu mümkün değil (kimlik açık anahtardan
+türüyor). Kapı yine de dar: köprü yalnızca `http(s)` adresi kabul ediyor ve
+indirme eklemekten başka bir şey yapmıyor. Alternatif — Firefox kullanıcısından
+da kimlik istemek — kullanıcının elinde olmayan bir bilgiyi sormak olurdu.
+
+**Üretilmiş paketler depoda tutuluyor.** `dist-extension/chrome` ve
+`dist-extension/firefox` commit'leniyor. Normalde derleme çıktısı depoya
+girmez; buradaki gerekçe kullanıcı tarafında: uzantı mağazalarda olmadığı için
+tek kurulum yolu "klasörü seç" ve o klasörün var olması için insanın Node
+kurup bir betik çalıştırması gerekseydi uzantıyı kimse kurmazdı. Ayrışma riski
+—çıktının kaynakla uyumsuz kalması— CI'a bağlandı: `npm run uzanti` sonrası
+`git diff` boş değilse derleme düşüyor. Aynı paketler her yayına zip olarak
+da ekleniyor (`release.yml` → `uzanti` işi).
+
+**Denenmedi:** kod ve testler hazır, gerçek bir Firefox kurulumunda
+çalıştırılmadı. Chrome tarafı 8. oturumda gerçek Chrome'la doğrulanmıştı;
+Firefox için aynı doğrulama bekliyor.

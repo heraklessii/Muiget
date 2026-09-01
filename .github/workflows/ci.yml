@@ -30,6 +30,30 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+  uzanti:
+    name: Uzantı paketleri güncel mi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # `dist-extension/` depoda duruyor: insanlar uzantıyı klonlayıp doğrudan
+      # yükleyebilsin diye. Bedeli, kaynakla ayrışma riski — bu adım o riski
+      # kapatıyor: paketler yeniden üretiliyor ve tek byte fark varsa derleme
+      # düşüyor. Bağımlılık kurmaya gerek yok, betik saf Node.
+      - name: Paketleri yeniden üret
+        run: npm run uzanti
+
+      - name: Fark var mı
+        run: |
+          if ! git diff --exit-code -- dist-extension; then
+            echo "::error::dist-extension/ güncel değil. 'npm run uzanti' çalıştırıp sonucu commit'leyin."
+            exit 1
+          fi
+
   rust:
     name: Motor (test + clippy)
     # Windows: projenin birincil hedefi burası ve Tauri'nin Linux'ta istediği

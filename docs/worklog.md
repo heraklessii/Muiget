@@ -7,6 +7,88 @@ Format: Tarih, yapılanlar, kararlar, sıradaki adım.
 
 ---
 
+## 2026-09-01 (14. oturum) — Firefox Desteği ve Uzantı Paketleyici (Faz 5)
+
+İstek: "geliştirmeye devam et." `docs/tasks.md` → "Sıradaki" listesindeki ilk
+iki madde kod işi değil (gerçek dünya ölçümü ve video akışının sahada
+denenmesi — ikisi de İlker'in makinesinde yapılacak). Kod işi olan ilk madde
+üçüncüsüydü: **tarayıcı kapsamı**. Bu oturumda o yapıldı (karar #31).
+
+### Ne değişti
+
+**Edge zaten çalışıyordu** — aynı manifest, aynı `chrome-extension://` kaynağı,
+registry kaydı da yazılıyordu. Gerçek iş Firefox'tu ve üç noktada ayrışıyor:
+
+1. **Manifest ikiye çıktı.** Chromium izin listesini `allowed_origins` içinde
+   tam kaynak adresi olarak, Firefox `allowed_extensions` içinde çıplak kimlik
+   olarak istiyor. Yanlış alanı yazmak sessizce "hiçbir uzantı yetkili değil"
+   demek olurdu — hata vermeyen, yalnızca hiç çalışmayan bir kurulum.
+   Windows'ta ikisi de aynı klasöre yazıldığı için dosya adları da ayrıldı;
+   aynı adı taşısalardı ikinci yazım birincisini ezerdi. Registry kökü:
+   `HKCU\Software\Mozilla\NativeMessagingHosts`.
+
+2. **Köprü kipi tespiti.** Bu, yanlış bilinseydi özelliğin tamamını sessizce
+   çöpe atacak noktaydı: Firefox köprüyü Chrome gibi `chrome-extension://…`
+   argümanıyla başlatmıyor. MDN'e bakıldı — Firefox **manifest yolunu** ve
+   (Firefox 55'ten beri) **eklenti kimliğini** geçiriyor. İkisi de köprü
+   işareti sayıldı. Tanınmasalardı Firefox'un her mesaj denemesi köprü yerine
+   uygulamanın penceresini açardı.
+
+3. **Firefox kimliği kullanıcıdan istenmiyor.** Chrome kimliği açık anahtardan
+   türüyor, sorulmak zorunda; Firefox kimliğini paketi üretirken biz yazıyoruz.
+   Ayarlardaki kutu artık boş bırakılabiliyor — yalnızca Firefox kullanan biri
+   sırf Chrome kimliği yok diye köprüyü kuramıyordu.
+
+**Uzantı paketleyici** (`tools/uzanti-paketle.js`, `npm run uzanti`). Firefox
+manifesti Chrome manifestinden **türetiliyor**; ikinci bir elle yazılmış
+manifest bilerek yok. Gerekçe geçmişten: uzantının sürüm numarası tam da böyle
+bir "iki yerde eşit tutulacak değer" olduğu için üç yayın boyunca geride
+kalmıştı. Betik `--magaza` bayrağıyla YouTube yakalamasını da kapatıyor
+(karar #27) ve sabiti bulamazsa **hata veriyor** — sessizce geçmek, yakalaması
+açık bir paketi Web Store'a göndermek olurdu.
+
+**`background.js` artık modül değil.** Aynı dosya Chrome'da servis çalışanı,
+Firefox'ta olay sayfası olarak yükleniyor ve olay sayfası bağlamında `export`
+sözdizimi hatası. `export`lar hiçbir yerden `import` edilmiyordu, kaldırıldı.
+Tarayıcı API'si tek sabitin arkasına alındı:
+`const api = globalThis.browser ?? globalThis.chrome`.
+
+### Paketler depoya kondu
+
+İlker'in isteği: "repoya extensionları da koy, insanlar rahat indirebilsin."
+`dist-extension/chrome` ve `dist-extension/firefox` artık commit'leniyor.
+Derleme çıktısını depoda tutmak normalde yanlış; burada gerekçe kullanıcı
+tarafında: uzantı mağazalarda olmadığı için tek kurulum yolu "klasörü seç" ve o
+klasörü üretmek için Node kurmak gerekseydi uzantıyı kimse kurmazdı.
+
+Ayrışma riski CI'a bağlandı — `ci.yml`'de yeni bir iş paketleri yeniden üretip
+`git diff`e bakıyor; tek byte fark varsa derleme düşüyor. Ayrıca `release.yml`
+her yayına iki zip ekliyor (`muiget-uzanti-chrome-*.zip`,
+`muiget-uzanti-firefox-*.zip`), böylece depoyu klonlamadan da indirilebiliyor.
+
+### Doğrulanan iki varsayım
+
+Firefox'un ne yaptığına dair iki nokta tahmine bırakılamazdı, MDN'den
+doğrulandı: (1) native uygulamaya manifest yolu + eklenti kimliği geçiyor,
+(2) `webRequest` Firefox'ta isteğe bağlı izin olabiliyor ve
+`optional_host_permissions` 128'de geldi — `strict_min_version` bu yüzden
+`128.0`.
+
+### Sayılar
+
+Testler 332 → **341** (291 → 300 birim). `cargo clippy --all-targets` ve
+`npm run build` temiz.
+
+### Sıradaki
+
+Firefox tarafı **sahada denenmedi**: manifest dönüşümü ve köprü kaydı testli,
+gerçek bir Firefox kurulumunda çalıştırılmadı. Chrome için aynı doğrulama
+8. oturumda yapılmıştı. Listenin geri kalanı değişmedi: gerçek dünya hız
+ölçümü, video akışının gerçek bir siteye karşı denenmesi, ardından mağaza
+yayınları (Chrome Web Store + AMO) ve Faz 4 (torrent).
+
+---
+
 ## 2026-09-01 (13. oturum) — Altyazı (Faz 6), Sessiz Bir Bozulma Hatası, Olay Biriktirme
 
 İstek: "geliştirmeye devam et, hataları düzelt, optimize et." Üçü de yapıldı;

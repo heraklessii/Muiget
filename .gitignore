@@ -65,3 +65,9 @@ site/.nojekyll
 coverage/
 *.profraw
 *.profdata
+
+# --- Uzantı paketleri ---
+# dist-extension/ BİLEREK yok sayılmıyor: kullanıcı uzantıyı depodan doğrudan
+# indirip yükleyebilsin diye üretilmiş paketler de commit'leniyor. Kaynakla
+# ayrışma riskini CI kapatıyor: `npm run uzanti` sonrası `git diff` boş değilse
+# derleme düşüyor (bkz. .github/workflows/ci.yml).

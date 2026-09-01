@@ -3,17 +3,26 @@
   "name": "Muiget",
   "version": "0.1.5",
   "description": "Bağlantıları Muiget indirme yöneticisine gönderir. Çoklu bağlantı, kaldığı yerden devam.",
-  "minimum_chrome_version": "116",
-
-  "permissions": ["contextMenus", "nativeMessaging", "storage", "activeTab", "scripting"],
-
-  "optional_permissions": ["downloads", "cookies", "webRequest"],
-  "optional_host_permissions": ["<all_urls>"],
-
+  "permissions": [
+    "contextMenus",
+    "nativeMessaging",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "optional_permissions": [
+    "downloads",
+    "cookies",
+    "webRequest"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
-    "service_worker": "background.js"
+    "scripts": [
+      "background.js"
+    ]
   },
-
   "action": {
     "default_title": "Muiget",
     "default_popup": "popup.html",
@@ -22,9 +31,14 @@
       "128": "icons/128.png"
     }
   },
-
   "icons": {
     "32": "icons/32.png",
     "128": "icons/128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "muiget@muiget.app",
+      "strict_min_version": "128.0"
+    }
   }
 }
